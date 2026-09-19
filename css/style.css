@@ -44,9 +44,10 @@
   --orb-gap: 17px;
 
   /* 抽牌 / 看牌 / 解读各段落位 */
-  --y-read: 66%;          /* 牌义文字块顶部（放大牌在其上方） */
+  --y-read: 64%;          /* 牌义文字块顶部（放大牌在其上方） */
   --y-ai-ring: 30%;       /* 解读光圈顶部（三张牌固定在上方） */
-  --y-ai-text: 40%;       /* 解读文字顶部 */
+  --y-ai-title: 40%;      /* 解读区标题 The Voice Within */
+  --y-ai-text: 45%;       /* 解读滚动区顶部（占下半屏） */
   --y-return: 17%;        /* 解读文字底部预留（返回光球在上面） */
   --ai-ring-size: 72px;
   --y-wheel-label: 4.6%;  /* 滚筒居中标签（牌上方固定位置） */
@@ -481,15 +482,24 @@ body.no-3d .card-hit img { visibility: visible; }
   position: fixed;
   left: 50%;
   top: var(--y-read);
-  bottom: 3.5%;
+  bottom: 3%;
   width: min(86vw, 640px);
   z-index: 4;
-  overflow: hidden;
+  overflow-y: auto;                     /* 双语内容更长：面板独立滚动 */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   text-align: center;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(16px);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
 }
+
+.card-read::-webkit-scrollbar { display: none; }
+
+.card-read.is-on { pointer-events: auto; }
 
 .card-read.is-on {
   opacity: 1;
@@ -534,6 +544,24 @@ body.no-3d .card-hit img { visibility: visible; }
   color: var(--gold);
 }
 
+.read-group-en { margin: 0 0 24px; }
+
+.read-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(23px, 3.4vw, 31px);
+  font-weight: 400;
+  letter-spacing: 0.09em;
+  color: var(--ivory);
+}
+
+.read-badge {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  letter-spacing: 0.26em;
+  color: var(--gold);
+}
+
 .read-keys {
   margin: 13px 0 0;
   font-size: 12.5px;
@@ -541,12 +569,24 @@ body.no-3d .card-hit img { visibility: visible; }
   color: var(--muted);
 }
 
-.read-text {
+.read-text-en {
   margin: 15px 0 0;
-  font-family: var(--font-body);
-  font-size: clamp(13px, 1.45vw, 14.5px);
-  line-height: 1.95;
-  color: #CFC8BC;
+  font-family: var(--font-display);       /* 英文衬线 */
+  font-size: clamp(12.5px, 1.32vw, 14px); /* 略小 */
+  letter-spacing: 0.045em;                /* 字距稍宽 */
+  line-height: 1.9;                       /* 行高舒适 */
+  color: #AFA693;                         /* 比中文淡一档 */
+}
+
+.read-group-cn .read-keys { color: var(--muted); }
+
+.read-text-cn {
+  margin: 14px 0 0;
+  font-family: var(--font-body);          /* 中文系统栈 */
+  font-size: clamp(13.5px, 1.45vw, 15px); /* 略大 */
+  letter-spacing: 0.02em;
+  line-height: 1.82;                      /* 行高比英文紧 */
+  color: #E4DED0;
 }
 
 /* ---------- 上滑引导：一条向上流动的星光（无任何文字） ---------- */
@@ -695,7 +735,24 @@ body.no-3d .card-hit img { visibility: visible; }
 .opening-ring.is-active .ring-wave:nth-child(3),
 .ai-ring.is-thinking .ring-wave:nth-child(3) { animation-delay: 3.0s; }
 
-/* 解读文字：无边框、无背景，只有字；从光圈位置向下浮出 */
+/* 解读区标题：衬线体，香槟金，居中 */
+.ai-title {
+  position: absolute;
+  top: var(--y-ai-title);
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: clamp(15px, 1.7vw, 18px);
+  font-weight: 500;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--gold);
+  pointer-events: none;
+}
+
+/* 解读文字：独立滚动区，无边框、无背景；上下边缘淡化 */
 .ai-text {
   position: absolute;
   left: 50%;
@@ -704,7 +761,8 @@ body.no-3d .card-hit img { visibility: visible; }
   width: min(86vw, 640px);
   transform: translateX(-50%) translateY(22px);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;      /* 移动端惯性滚动 */
+  overscroll-behavior: contain;           /* 滚到边界不带动页面 */
   text-align: center;
   font-family: var(--font-body);
   font-size: clamp(13.5px, 1.5vw, 15px);
@@ -713,6 +771,8 @@ body.no-3d .card-hit img { visibility: visible; }
   opacity: 0;
   pointer-events: none;
   scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 30px, #000 calc(100% - 34px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 30px, #000 calc(100% - 34px), transparent 100%);
 }
 
 .reading-view.is-on .ai-text { pointer-events: auto; }
@@ -728,6 +788,7 @@ body.no-3d .card-hit img { visibility: visible; }
 .ai-text p { margin: 0 0 18px; }
 .ai-text p:last-child { margin-bottom: 0; }
 .ai-text .ai-note { font-size: 12px; letter-spacing: 0.08em; color: var(--faint); }
+.ai-text .ai-note-en { font-family: var(--font-display); letter-spacing: 0.06em; }
 .ai-text .ai-error { color: #E0C9A6; }
 
 /* ---------- 中英双语分组：英文在上（辅助），中文在下（主） ---------- */
@@ -854,9 +915,10 @@ body.no-3d .card-hit img { visibility: visible; }
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
-    --y-read: 64%;
+    --y-read: 62%;
     --y-ai-ring: 28.5%;
-    --y-ai-text: 38.5%;
+    --y-ai-title: 38.5%;
+    --y-ai-text: 43.5%;
     --ai-ring-size: 66px;
   }
 
@@ -877,9 +939,10 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-hint: 60%;
     --y-ring: 70%;
     --ring-size: 64px;
-    --y-read: 62%;
+    --y-read: 60%;
     --y-ai-ring: 27%;
-    --y-ai-text: 36%;
+    --y-ai-title: 36%;
+    --y-ai-text: 41.5%;
     --y-return: 19%;
     --ai-ring-size: 60px;
   }

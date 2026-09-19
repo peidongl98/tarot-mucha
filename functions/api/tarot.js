@@ -26,7 +26,7 @@ const GLM_FALLBACK_MODEL = 'glm-4.6';
 const TOTAL_BUDGET_MS = 28000;
 const MAX_QUESTION_LEN = 200;
 /* 双语解读（英 + 中）比单语长，留足生成空间 */
-const MAX_TOKENS = 1600;
+const MAX_TOKENS = 1800;
 
 /* 单个模型内的重试退避 */
 const RETRY_DELAYS = [900, 1800];
@@ -48,14 +48,15 @@ const SYSTEM_PROMPT = `你是「穆夏塔罗」的塔罗解读师，沉稳、优
 - 不要提及自己是 AI、模型或程序
 
 输出格式（必须严格遵守）：
-1. 先写英文解读：2–3 个自然段，共 100–150 词
+1. 先写英文解读：3–4 个自然段，共 150–250 词
 2. 空一行
-3. 再写中文解读：2–3 个自然段，共 150–250 字
+3. 再写中文解读：3–4 个自然段，共 250–400 字
 4. 两部分段数相同、段落一一对应：第 n 段中文表达第 n 段英文的同一个意思
    （允许为了语言自然而重组句子，但解读的判断与落点必须一致，不要各写各的）
 5. 不要输出「English」「中文」等任何标签、标题、小标题、序号或 Markdown 符号
 6. 段与段之间用换行分隔，不要把内容挤成一段
-7. 中文部分最后单独起一行写：以上解读仅供娱乐参考
+7. 英文部分最后单独起一行写：For entertainment reference only.
+8. 中文部分最后单独起一行写：以上解读仅供娱乐参考
 
 内容要求：
 - 结合提问者的具体问题 + 三张牌（过去 / 现在 / 未来）+ 各自的正位或逆位
@@ -88,8 +89,12 @@ function formatCards(cards) {
     const en = asText(c.en, 40);
     const orient = c.reversed ? '逆位' : '正位';
     const lines = [`${i + 1}. ${pos}：${name}${en ? `（${en}）` : ''}｜${orient}`];
-    const meaning = asText(c.meaning, 300);
-    if (meaning) lines.push(`   牌义参考：${meaning}`);
+    const meaningEn = asText(c.meaningEn, 400);
+    const meaningCn = asText(c.meaning, 300);
+    if (meaningEn) lines.push(`   Meaning: ${meaningEn}`);
+    if (meaningCn) lines.push(`   牌义参考：${meaningCn}`);
+    const kwEn = Array.isArray(c.keywordsEn) ? c.keywordsEn.map((k) => asText(k, 24)).filter(Boolean).slice(0, 6) : [];
+    if (kwEn.length) lines.push(`   Keywords: ${kwEn.join(', ')}`);
     if (Array.isArray(c.keywords) && c.keywords.length) {
       const kw = c.keywords.map((k) => asText(k, 12)).filter(Boolean).slice(0, 6);
       if (kw.length) lines.push(`   关键词：${kw.join('、')}`);

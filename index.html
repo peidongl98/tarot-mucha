@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0A0908">
-<meta name="description" content="Mucha Tarot · 抽三张牌，看见过去、现在与未来。内置 78 张公版牌义，可选用 AI 深度解读。纯娱乐。">
+<meta name="description" content="Mucha Tarot — draw three cards and see past, present and future. 78 public-domain meanings, optional AI reading in English and Chinese. For entertainment only.">
 <title>Tarot</title>
 <link rel="icon" href="cards/favicon.png">
 
@@ -34,14 +34,14 @@
 
 <!-- WebGL 不可用时的友好提示 -->
 <div id="glNotice" class="gl-notice" hidden>
-  <p class="gl-notice-title">你的浏览器暂不支持 3D 渲染</p>
-  <p class="gl-notice-text">页面已切换为简洁模式，功能完全正常。</p>
+  <p class="gl-notice-title">3D rendering is not available in this browser</p>
+  <p class="gl-notice-text">Switched to the simple mode. Everything still works.</p>
 </div>
 
 <noscript>
   <div class="gl-notice">
-    <p class="gl-notice-title">需要开启 JavaScript</p>
-    <p class="gl-notice-text">本页依赖 JavaScript，请在浏览器设置中开启后刷新。</p>
+    <p class="gl-notice-title">JavaScript is required</p>
+    <p class="gl-notice-text">Enable JavaScript in your browser settings and refresh.</p>
   </div>
 </noscript>
 
@@ -49,25 +49,20 @@
 <canvas id="burstLayer" class="burst-layer" aria-hidden="true"></canvas>
 
 <!-- 牌背点击区：canvas 是 pointer-events:none，所以用透明按钮对齐到 3D 牌背 -->
-<button id="deckHit" class="deck-hit" type="button" aria-label="展开牌阵" hidden>
+<button id="deckHit" class="deck-hit" type="button" aria-label="Spread the cards" hidden>
   <img class="deck-hit-img" src="cards/back.jpg" alt="">
 </button>
 
 <!-- 三张牌的点击区（每帧对齐 3D 投影） -->
-<button id="hit0" class="card-hit" type="button" aria-label="第一张牌" hidden></button>
-<button id="hit1" class="card-hit" type="button" aria-label="第二张牌" hidden></button>
-<button id="hit2" class="card-hit" type="button" aria-label="第三张牌" hidden></button>
+<button id="hit0" class="card-hit" type="button" aria-label="Past" hidden></button>
+<button id="hit1" class="card-hit" type="button" aria-label="Present" hidden></button>
+<button id="hit2" class="card-hit" type="button" aria-label="Future" hidden></button>
 
 <!-- 放大态：牌上方的金色身份文字（过去 / 现在 / 未来） -->
 <p class="zoom-label" id="zoomLabel" aria-hidden="true"></p>
 
-<!-- 牌义：放大某张牌时浮出（只有文字，没有框线） -->
-<section class="card-read" id="cardRead" aria-live="polite">
-  <h2 class="read-name" id="readName"></h2>
-  <p class="read-badge" id="readBadge"></p>
-  <p class="read-keys" id="readKeys"></p>
-  <p class="read-text" id="readText"></p>
-</section>
+<!-- 牌义：放大某张牌时浮出 —— 英文在前、中文在后，与解读同款排版；无框线 -->
+<section class="card-read" id="cardRead" aria-live="polite"></section>
 
 <!-- 上滑引导：一条向上流动的星光 -->
 <div class="star-hint" id="starHint" aria-hidden="true"></div>
@@ -78,15 +73,16 @@
 <!-- 滚筒居中标签：某张牌转到中央时淡入（牌上方固定位置，不随牌浮动） -->
 <p class="wheel-label" id="wheelLabel" aria-hidden="true"></p>
 
-<!-- 解读视图：光圈 + 解读文字 + 返回光球 -->
+<!-- 解读视图：标题 + 独立滚动区 + 光圈 + 返回光球 -->
 <section class="reading-view" id="readingView">
-  <button id="aiRing" class="ai-ring" type="button" aria-label="开始解读">
+  <h2 class="ai-title" aria-hidden="true">The Voice Within</h2>
+  <button id="aiRing" class="ai-ring" type="button" aria-label="Begin the reading">
     <span class="ring-wave"></span>
     <span class="ring-wave"></span>
     <span class="ring-wave"></span>
   </button>
   <div class="ai-text" id="aiText" aria-live="polite"></div>
-  <button id="returnOrb" class="return-orb" type="button" aria-label="保存并返回">
+  <button id="returnOrb" class="return-orb" type="button" aria-label="Hold to save and return">
     <span class="return-orb-core"></span>
   </button>
 </section>
@@ -127,6 +123,7 @@
 <!-- 数据层：保持既有的全局变量形式（先于模块执行） -->
 <script src="js/data.js"></script>
 <script src="data/meanings.js"></script>
+<script src="data/meanings.en.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

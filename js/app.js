@@ -24,7 +24,7 @@
 import { createTarotScene } from './scene.js';
 
 const MAX_QUESTION_LEN = 200;
-const POSITIONS = ['过去', '现在', '未来'];
+const POSITIONS = ['Past', 'Present', 'Future'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 /* 顶部光球：最多 3 个，从左到右 = 最旧 → 最新 */
@@ -739,14 +739,30 @@ function zoomOut() {
   if (cardsFlipped.every(Boolean)) showStarHint(true);
 }
 
+/* 牌义面板：英文在前、中文在后，与解读同款排版（英衬线略小偏淡，中系统栈略大） */
 function showMeaning(i) {
   const meta = TAROT_BY_ID[lastReading[i].id];
-  const mean = TAROT_MEANINGS[lastReading[i].id];
+  const cn = TAROT_MEANINGS[lastReading[i].id] || null;
+  const en = (typeof TAROT_MEANINGS_EN !== 'undefined' && TAROT_MEANINGS_EN[lastReading[i].id]) || null;
   const rev = !!lastReading[i].reversed;
-  el.readName.textContent = meta.name;
-  el.readBadge.textContent = rev ? '逆位' : '正位';
-  el.readKeys.textContent = (mean ? (rev ? mean.revKeys : mean.upKeys) : []).join(' · ');
-  el.readText.textContent = mean ? (rev ? mean.rev : mean.up) : '暂无牌义数据';
+
+  const gEn = elNew('div', 'ai-group read-group-en');
+  if (en || meta) gEn.appendChild(elNew('h2', 'read-name', (en && en.name) || meta.en || meta.name));
+  gEn.appendChild(elNew('p', 'read-badge', rev ? 'REVERSED' : 'UPRIGHT'));
+  if (en) {
+    gEn.appendChild(elNew('p', 'read-keys', (rev ? en.revKeys : en.upKeys).join(' · ')));
+    gEn.appendChild(elNew('p', 'read-text read-text-en', rev ? en.rev : en.up));
+  }
+
+  const gCn = elNew('div', 'ai-group read-group-cn');
+  if (cn) {
+    gCn.appendChild(elNew('p', 'read-keys', (rev ? cn.revKeys : cn.upKeys).join(' · ')));
+    gCn.appendChild(elNew('p', 'read-text read-text-cn', rev ? cn.rev : cn.up));
+  }
+
+  el.cardRead.textContent = '';
+  el.cardRead.appendChild(gEn);
+  el.cardRead.appendChild(gCn);
   el.cardRead.classList.add('is-on');
 }
 
@@ -834,7 +850,9 @@ function showAiText(text, instant) {
   const gEn = elNew('div', 'ai-group ai-group-en');
   const gCn = elNew('div', 'ai-group ai-group-cn');
   en.forEach((t) => gEn.appendChild(elNew('p', 'ai-en', t)));
-  cn.forEach((t) => gCn.appendChild(elNew('p', /仅供娱乐参考/.test(t) ? 'ai-note' : null, t)));
+  const isNote = (t) => /仅供娱乐参考|for entertainment/i.test(t);
+  en.forEach((t) => gEn.appendChild(elNew('p', isNote(t) ? 'ai-note ai-note-en' : 'ai-en', t)));
+  cn.forEach((t) => gCn.appendChild(elNew('p', isNote(t) ? 'ai-note' : null, t)));
   if (gEn.childElementCount) el.aiText.appendChild(gEn);
   if (gCn.childElementCount) el.aiText.appendChild(gCn);
   el.aiText.classList.add('is-on');
@@ -876,7 +894,7 @@ async function askAi() {
   setAiThinking(true);
   el.aiText.textContent = '';
   el.aiText.classList.add('is-on');
-  el.aiText.appendChild(elNew('p', 'ai-note', '正在读取牌面…'));
+  el.aiText.appendChild(elNew('p', 'ai-note', 'Reading the cards…'));
 
   const payload = {
     question: lastQuestion,
@@ -884,13 +902,16 @@ async function askAi() {
       const meta = TAROT_BY_ID[c.id];
       const mean = TAROT_MEANINGS[c.id];
       const rev = !!c.reversed;
+      const en = (typeof TAROT_MEANINGS_EN !== 'undefined' && TAROT_MEANINGS_EN[c.id]) || null;
       return {
-        name: meta.name,
+        name: meta.name,                                    // 中文牌名（供中文段）
         position: c.position || '',
         reversed: rev,
-        en: meta.en,
-        meaning: mean ? (rev ? mean.rev : mean.up) : '',
+        en: meta.en,                                        // 英文牌名
+        meaning: mean ? (rev ? mean.rev : mean.up) : '',    // 中文牌义
         keywords: mean ? (rev ? mean.revKeys : mean.upKeys) : [],
+        meaningEn: en ? (rev ? en.rev : en.up) : '',        // 英文牌义
+        keywordsEn: en ? (rev ? en.revKeys : en.upKeys) : [],
       };
     }),
   };
@@ -908,7 +929,7 @@ async function askAi() {
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
     if (!res.ok || !data || !data.success || !data.reading) {
-      showAiError((data && data.error) || '解读服务暂时不可用，请稍后再试。');
+      showAiError((data && data.error) || 'The reading is unavailable right now. Please try again later.');
       return;
     }
     lastAiText = data.reading;
@@ -919,8 +940,8 @@ async function askAi() {
       writeOrbs(records);
     }
   } catch (e) {
-    if (e && e.name === 'AbortError') showAiError('解读超时了。网络较慢或模型繁忙，请稍后再试一次。');
-    else showAiError('网络不通，解读服务暂时联系不上。请检查网络后重试。');
+    if (e && e.name === 'AbortError') showAiError('The reading timed out. The model is busy — please try again shortly.');
+    else showAiError('Network trouble — the reading service could not be reached. Please check your connection and retry.');
   } finally {
     clearTimeout(timer);
     aiBusy = false;
@@ -945,7 +966,9 @@ function onWheel(e) {
     return;
   }
   if (state === S.READING && e.deltaY > 4) {
-    if (el.aiText.scrollTop > 2) { el.aiText.scrollTop -= e.deltaY; return; }
+    // 解读区是独立滚动容器：内容没滚到底就不退出（原生滚动负责容器内部）
+    const t = el.aiText;
+    if (t && t.scrollHeight > t.clientHeight + 2 && t.scrollTop + t.clientHeight < t.scrollHeight - 2) return;
     exitReading();
   }
 }
@@ -1307,7 +1330,7 @@ function init() {
   try { localStorage.removeItem(LEGACY_KEY); } catch (e) { /* 忽略 */ }
 
   const dataOk = typeof TAROT_CARDS !== 'undefined' && TAROT_CARDS.length === 78;
-  if (!dataOk && el.drawHint) el.drawHint.textContent = '牌面数据加载失败，请刷新页面';
+  if (!dataOk && el.drawHint) el.drawHint.textContent = 'Card data failed to load. Please refresh.';
 
   /* ---- 3D 场景 ---- */
   scene = createTarotScene(el.gl);
