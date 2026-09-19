@@ -842,12 +842,23 @@ function splitReading(text) {
       return joined.join(' ');                      // 段内软换行以空格相连（含中英双免责相邻行）
     })
     .filter(Boolean);
-  const en = [];
+  const enRaw = [];
   const cn = [];
   blocks.forEach((p) => {
     const cjk = (p.match(/[\u4e00-\u9fff]/g) || []).length;
-    (cjk >= 2 ? cn : en).push(p);
+    (cjk >= 2 ? cn : enRaw).push(p);
   });
+
+  /* 兜底归并：模型偶发把英文段按空行多拆一倍（实测 8 段 vs 中文 4 段）。
+   * 中英段落按顺序一一对应 —— 当英文段数是中文的整数倍时，按序均匀合并回对应段。 */
+  let en = enRaw;
+  if (cn.length > 0 && enRaw.length > cn.length && enRaw.length % cn.length === 0) {
+    const k = enRaw.length / cn.length;
+    en = [];
+    for (let i = 0; i < cn.length; i++) {
+      en.push(enRaw.slice(i * k, (i + 1) * k).join(' '));
+    }
+  }
   return { en, cn };
 }
 
