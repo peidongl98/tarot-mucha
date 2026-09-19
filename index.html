@@ -72,6 +72,18 @@
   <div class="hero-rule anim-hero"></div>
   <p class="hero-positions anim-hero">过去<i>·</i>现在<i>·</i>未来</p>
   <p class="hero-note anim-hero">静下心，把问题放在心里，然后抽三张牌。</p>
+
+  <!-- 提问前移：问题在抽牌前输入，抽牌后带着问题进入后续解读 -->
+  <div class="hero-question anim-hero">
+    <label class="ai-label" for="question">你想问什么</label>
+    <textarea id="question" class="ai-input" rows="2" maxlength="200"
+      placeholder="你想问什么？（感情 / 事业 / 学业 / 其他）"></textarea>
+    <div class="hero-question-meta">
+      <p class="question-hint">同一件事短期内不宜反复占卜，牌象会失真。</p>
+      <span id="questionCount" class="ai-count">0 / 200</span>
+    </div>
+  </div>
+
   <div class="hero-actions anim-hero">
     <button id="drawBtn" class="btn-primary" type="button">开 始 抽 牌</button>
   </div>
@@ -100,15 +112,16 @@
   <div class="section-head">
     <h2 class="section-title">AI 解 读</h2>
     <div class="section-rule"></div>
-    <p class="section-note">写下你的问题，让解读落在具体的事情上。不填也可以，会给出整体解读。</p>
+    <p class="section-note">用上方填写的问题进行解读。没有填写也可以，会给出整体解读。</p>
   </div>
 
   <div class="ai-card">
-    <label class="ai-label" for="question">你想问什么</label>
-    <textarea id="question" class="ai-input" rows="3" maxlength="200"
-      placeholder="例如：我该不该换一份工作？"></textarea>
+    <!-- 输入框已前移到首屏，这里只回显将被使用的问题 -->
+    <p class="ai-question">
+      <span class="ai-question-label">你的问题</span>
+      <span id="aiQuestionEcho" class="ai-question-text is-empty">（未填写，将给出整体解读）</span>
+    </p>
     <div class="ai-meta">
-      <span id="questionCount" class="ai-count">0 / 200</span>
       <button id="aiBtn" class="btn-secondary" type="button" disabled>AI 解 读</button>
     </div>
     <div id="aiOut" class="ai-out" aria-live="polite"></div>

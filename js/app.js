@@ -15,6 +15,7 @@ import { createTarotScene } from './scene.js';
 
 const STORAGE_KEY = 'tarot_history';
 const HISTORY_LIMIT = 30;
+const MAX_QUESTION_LEN = 200;
 const POSITIONS = ['过去', '现在', '未来'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -297,6 +298,7 @@ function showReading(cards, opts) {
   armSimpleReveal('.ai-card', '#aiSection');
   armSimpleReveal('.history-item', '#history');
   updateAiButton();
+  syncQuestionEcho();
 
   if (o.scroll) {
     requestAnimationFrame(() => {
@@ -344,6 +346,19 @@ function onClear() {
 function updateAiButton() {
   if (!el.aiBtn) return;
   el.aiBtn.disabled = aiBusy || !lastReading;
+}
+
+/* 提问前移后：问题只在首屏采集，这里统一读取 */
+function currentQuestion() {
+  return el.question ? (el.question.value || '').trim().slice(0, MAX_QUESTION_LEN) : '';
+}
+
+/* 把将被使用的问题回显到 AI 面板（解读者与用户看到的是同一个问题） */
+function syncQuestionEcho() {
+  if (!el.aiQuestionEcho) return;
+  const q = currentQuestion();
+  el.aiQuestionEcho.textContent = q || '（未填写，将给出整体解读）';
+  el.aiQuestionEcho.classList.toggle('is-empty', !q);
 }
 
 /* 加载状态：呼吸光晕（CSS），不用转圈 */
@@ -405,7 +420,7 @@ function typeOut(text, done) {
 async function askAi() {
   if (aiBusy || !lastReading) return;
 
-  const question = (el.question.value || '').trim().slice(0, 200);
+  const question = currentQuestion();
   setAiLoading(true);
   el.aiOut.textContent = '';
   el.aiOut.appendChild(elNew('p', null, '正在为你读取牌面……'));
@@ -477,6 +492,7 @@ function cacheDom() {
   el.clearBtn = document.getElementById('clearBtn');
   el.aiCard = document.querySelector('.ai-card');
   el.aiBtn = document.getElementById('aiBtn');
+  el.aiQuestionEcho = document.getElementById('aiQuestionEcho');
   el.aiOut = document.getElementById('aiOut');
   el.question = document.getElementById('question');
   el.questionCount = document.getElementById('questionCount');
@@ -519,7 +535,8 @@ function init() {
   el.clearBtn.addEventListener('click', onClear);
   el.aiBtn.addEventListener('click', askAi);
   el.question.addEventListener('input', () => {
-    el.questionCount.textContent = `${el.question.value.length} / 200`;
+    el.questionCount.textContent = `${el.question.value.length} / ${MAX_QUESTION_LEN}`;
+    syncQuestionEcho();
   });
   el.question.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') askAi();
@@ -529,6 +546,7 @@ function init() {
   introHero();
   renderHistory(loadHistory());
   updateAiButton();
+  syncQuestionEcho();
   tickLabels();
   armCameraScroll();
 }

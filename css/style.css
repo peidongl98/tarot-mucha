@@ -222,7 +222,7 @@ body:not(.has-draw) .stage-overlay { display: none; }
   color: var(--muted);
 }
 
-.hero-actions { margin-top: 46px; }
+.hero-actions { margin-top: 26px; }
 
 .hero-hint {
   margin: 18px 0 0;
@@ -230,6 +230,42 @@ body:not(.has-draw) .stage-overlay { display: none; }
   letter-spacing: 0.16em;
   color: var(--faint);
 }
+
+/* ---------- 首屏提问（提问前移） ---------- */
+
+.hero-question {
+  width: 100%;
+  max-width: 460px;
+  margin: 32px auto 0;
+  text-align: left;
+}
+
+.hero-question .ai-label { display: block; }
+
+.hero-question .ai-input {
+  min-height: 76px;
+  margin-top: 12px;
+  font-size: 13.5px;
+}
+
+.hero-question-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 9px;
+}
+
+/* 传统提示：次要文字色、字号小，纯提示不做限制 */
+.question-hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+}
+
+.hero-question .ai-count { flex: none; }
 
 /* ============================================================
    按钮
@@ -604,9 +640,40 @@ body.no-3d .read-thumb {
 .ai-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
   margin-top: 16px;
+}
+
+/* AI 面板回显所用问题（输入框已前移到首屏） */
+.ai-question {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.ai-question-label {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: var(--gold-dim);
+}
+
+.ai-question-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ivory);
+}
+
+.ai-question-text.is-empty {
+  font-size: 13px;
+  color: var(--faint);
 }
 
 .ai-count {
@@ -772,7 +839,7 @@ body.no-3d .read-thumb {
 
   .reading-grid { grid-template-columns: 1fr; gap: 18px; }
 
-  .hero { padding: 64px 20px 72px; }
+  .hero { padding: 48px 20px 56px; }
 
   .hero-title { letter-spacing: 0.24em; text-indent: 0.24em; }
 
