@@ -891,8 +891,9 @@ function showAiText(text, instant) {
   const gCn = elNew('div', 'ai-group ai-group-cn');
   en.forEach((t) => gEn.appendChild(elNew('p', 'ai-en', t)));
   cn.forEach((t) => gCn.appendChild(elNew('p', null, t)));
-  if (r.enNote) gEn.appendChild(elNew('p', 'ai-note ai-note-en', r.enNote));
-  if (r.cnNote) gCn.appendChild(elNew('p', 'ai-note', r.cnNote));
+  // 免责声明前端兜底：模型偶发漏写时自动补上（extract 到了就用模型的，保证不重复）
+  gEn.appendChild(elNew('p', 'ai-note ai-note-en', r.enNote || 'For entertainment reference only.'));
+  gCn.appendChild(elNew('p', 'ai-note', r.cnNote || '以上解读仅供娱乐参考'));
   if (gEn.childElementCount) el.aiText.appendChild(gEn);
   if (gCn.childElementCount) el.aiText.appendChild(gCn);
   el.aiText.classList.add('is-on');
