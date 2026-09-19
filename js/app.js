@@ -553,12 +553,13 @@ function setInputLocked(on) {
 function wheelNudge(dxPx) {
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   wheel.dragging = true;
-  wheel.a += dxPx * (WHEEL_DRAG_RATE / Math.max(1, window.innerWidth));
+  wheel.a -= dxPx * (WHEEL_DRAG_RATE / Math.max(1, window.innerWidth));   // 左拖 = 前进
 }
 
 function wheelSnapTo(target, dur) {
   const gsap = window.gsap;
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
+  if (Math.abs(target - wheel.a) < 1e-6) return;   // 已在目标角：不建补间，保持 resting
   if (!gsap || REDUCED) { wheel.a = target; return; }
   wheel.tween = gsap.to(wheel, {
     a: target, duration: dur || 0.8, ease: 'power3.out',   // 柔顺吸附，无弹簧回弹
@@ -569,7 +570,7 @@ function wheelSnapTo(target, dur) {
 function wheelRelease(velocityPxPerSec) {
   wheel.dragging = false;
   const rate = WHEEL_DRAG_RATE / Math.max(1, window.innerWidth);
-  const proj = wheel.a + (velocityPxPerSec || 0) * WHEEL_FLING_GAIN * rate;
+  const proj = wheel.a - (velocityPxPerSec || 0) * WHEEL_FLING_GAIN * rate;   // 惯性与拖动同向
   wheelSnapTo(Math.round(proj / WHEEL_STEP) * WHEEL_STEP, 0.85);
 }
 
@@ -1419,6 +1420,7 @@ function init() {
     gsap.from(el.openingTitle, { y: -18, opacity: 0, duration: 1.4, ease: 'power3.out', delay: 0.15 });
   }
 
+  setAskVisible(false, true);   // 状态 1 不出现问句/输入/提示/光圈（含 visibility，防透明输入框挡点击）
   syncRing();
   tickOverlay();
   state = S.OPENING;
