@@ -73,6 +73,7 @@ body {
   line-height: 1.85;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  touch-action: pan-y;   /* 横向拖动留给滚筒，纵向留给上滑手势 */
 }
 
 /* 开场期间页面正好一屏，不出现滚动条 */

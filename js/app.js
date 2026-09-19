@@ -38,6 +38,12 @@ const DRAG_SLOP = 12;          // 按下到抬起的位移阈值（px）：超�
 const SWIPE_MIN = 46;          // 触发上滑 / 下滑的最小竖直位移
 const SWIPE_MAX_MS = 700;      // 手势最长时间
 
+/* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互） */
+const WHEEL_STEP = (Math.PI * 2) / 3;   // 相邻两牌的角距（120°）
+const WHEEL_DRAG_RATE = 3.4;            // 拖动灵敏度（每视口宽的弧度）
+const WHEEL_FLING_GAIN = 0.16;          // 惯性外推时间（秒）
+const wheel = { a: 0, dragging: false, tween: null, suppressedAt: 0 };
+
 /* 状态机 */
 const S = { OPENING: 'opening', ASK: 'ask', DEAL: 'deal', ROW: 'row', ZOOM: 'zoom', READING: 'reading', ENDING: 'ending' };
 let state = S.OPENING;
@@ -507,11 +513,102 @@ function setInputLocked(on) {
 }
 
 /* ============================================================
+ * 滚筒：角度 / 拖动 / 惯性 / 吸附
+ * 左右拖动 → 改变角度（渲染循环逐帧摆位）；松手按惯性外推后吸附到最近的牌。
+ * 拖动只换位置，不改变朝向 —— 翻没翻由 cardsFlipped 决定，必须点击才翻面。
+ * ============================================================ */
+
+function wheelNudge(dxPx) {
+  if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
+  wheel.dragging = true;
+  wheel.a += dxPx * (WHEEL_DRAG_RATE / Math.max(1, window.innerWidth));
+}
+
+function wheelSnapTo(target, dur) {
+  const gsap = window.gsap;
+  if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
+  if (!gsap || REDUCED) { wheel.a = target; return; }
+  wheel.tween = gsap.to(wheel, {
+    a: target, duration: dur || 0.8, ease: 'power3.out',   // 柔顺吸附，无弹簧回弹
+    onComplete: () => { wheel.tween = null; },
+  });
+}
+
+function wheelRelease(velocityPxPerSec) {
+  wheel.dragging = false;
+  const rate = WHEEL_DRAG_RATE / Math.max(1, window.innerWidth);
+  const proj = wheel.a + (velocityPxPerSec || 0) * WHEEL_FLING_GAIN * rate;
+  wheelSnapTo(Math.round(proj / WHEEL_STEP) * WHEEL_STEP, 0.85);
+}
+
+/* 把第 index 张牌转到居中位（取当前角度附近最近的等价角，避免绕远路） */
+function wheelGoTo(index, dur) {
+  const base = index * WHEEL_STEP;
+  const twoPi = Math.PI * 2;
+  const target = base + twoPi * Math.round((wheel.a - base) / twoPi);
+  wheelSnapTo(target, dur || 0.75);
+}
+
+function wheelFocusedIndex() {
+  let best = 0;
+  let bd = Infinity;
+  for (let i = 0; i < 3; i++) {
+    let d = (i * WHEEL_STEP - wheel.a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    else if (d < -Math.PI) d += Math.PI * 2;
+    if (Math.abs(d) < bd) { bd = Math.abs(d); best = i; }
+  }
+  return best;
+}
+
+/* 第 i 张牌与居中位的对齐度（1 = 正居中；侧牌 ≈ -0.5） */
+function wheelFocusCos(i) {
+  let d = (i * WHEEL_STEP - wheel.a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  else if (d < -Math.PI) d += Math.PI * 2;
+  return Math.cos(d);
+}
+
+const wheelResting = () => !wheel.dragging && !wheel.tween;
+
+/* ---- 指针拖动（窗口级：从任何位置起拖都行；点击与拖动用位移阈值区分） ---- */
+let wheelPtr = null;
+
+function onWheelPtrDown(e) {
+  if (state !== S.ROW || wheelPtr) return;
+  wheelPtr = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), vx: 0, moved: 0 };
+}
+
+function onWheelPtrMove(e) {
+  if (!wheelPtr || e.pointerId !== wheelPtr.id) return;
+  const dx = e.clientX - wheelPtr.lastX;
+  const dy = e.clientY - wheelPtr.lastY;
+  wheelPtr.lastX = e.clientX;
+  wheelPtr.lastY = e.clientY;
+  wheelPtr.moved += Math.abs(dx) + Math.abs(dy);
+  if (!dx) return;
+  const now = performance.now();
+  const dt = Math.max(8, now - wheelPtr.lastT) / 1000;
+  wheelPtr.lastT = now;
+  wheelPtr.vx = wheelPtr.vx * 0.7 + (dx / dt) * 0.3;   // 平滑速度，松手时用于惯性
+  wheelNudge(dx);
+}
+
+function onWheelPtrUp(e) {
+  if (!wheelPtr || e.pointerId !== wheelPtr.id) return;
+  const v = wheelPtr.vx;
+  const moved = wheelPtr.moved;
+  wheelPtr = null;
+  wheelRelease(moved > DRAG_SLOP ? v : 0);
+  if (moved > DRAG_SLOP) wheel.suppressedAt = Date.now();   // 拖动后的误点击不当作翻牌
+}
+
+/* ============================================================
  * 阶段 1：点光圈 → 抽牌
  * ============================================================ */
 
 async function startDraw() {
-  if (state !== S.ASK && state !== S.OPENING) return;
+  if (state !== S.ASK) return;
   state = S.DEAL;
 
   lastQuestion = currentQuestion();
@@ -521,7 +618,8 @@ async function startDraw() {
   currentAt = null;
   fromHistory = false;
 
-  if (scene && scene.ok) scene.setDeckRaised(false);   // 抽牌前先把牌背归位
+  wheel.a = 0;                                        // 过去居中开场
+  if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   setInputLocked(true);
   showStarHint(false);
 
@@ -535,14 +633,14 @@ async function startDraw() {
   // ③ 问句 / 输入 / 提示 / 光圈淡出
   const fade = hideAskArea();
 
-  // ④ 扇形退场 + 三张牌从扇面位置飞到中央（背面朝上）
+  // ④ 扇形退场 + 三张牌飞向滚筒（背面朝上）
   if (scene && scene.ok) {
     await scene.dealFromFan(cards.map((c) => ({
       src: 'cards/' + TAROT_BY_ID[c.id].file,
       reversed: !!c.reversed,
     })));
   } else {
-    layoutFallbackCards();
+    layoutFallbackWheel();
   }
   await fade;
 
@@ -556,11 +654,19 @@ async function startDraw() {
  * ============================================================ */
 
 function onCardHit(i) {
+  if (Date.now() - wheel.suppressedAt < 400) return;   // 拖动结束后的误触不当作点击
   if (state === S.ZOOM) {
     if (zoomIndex === i) zoomOut();
     return;
   }
   if (state !== S.ROW) return;
+
+  // 只有居中的那张可以交互；点侧牌 → 把它转到居中（自然行为，翻面仍须在居中位点击）
+  const focused = wheelFocusedIndex();
+  if (i !== focused || !wheelResting()) {
+    if (i !== focused) wheelGoTo(i);
+    return;
+  }
 
   if (!cardsFlipped[i]) {
     cardsFlipped[i] = true;
@@ -996,23 +1102,32 @@ async function restoreRecord(rec) {
  * 点击区对齐（3D 模式按投影；无 3D 模式用固定排布）
  * ============================================================ */
 
-function layoutFallbackCards() {
+/* 无 3D 时的滚筒：用与 3D 相同的公式算屏幕矩形，图片按当前朝向显示 */
+function layoutFallbackWheel() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const cw = Math.min(w * 0.26, 200);
-  const ch = cw / 0.5625;
-  const gap = cw * 0.18;
-  const total = cw * 3 + gap * 2;
-  const x0 = (w - total) / 2;
-  const y = h * 0.5 - ch / 2;
+  const cardH = Math.min(h * 0.45, w * 1.62);
+  const ratio = 0.5625;
+  const R = h * 0.275;
+  const cy = h * 0.445;
   for (let i = 0; i < 3; i++) {
     const n = el.hits[i];
     if (!n) continue;
+    let d = (i * WHEEL_STEP - wheel.a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    else if (d < -Math.PI) d += Math.PI * 2;
+    const c = Math.cos(d);
+    const scale = 0.72 + (1 - 0.72) * Math.max(0, c);
+    const cw = cardH * ratio * scale;
+    const ch = cardH * scale;
+    const y = cy - R * Math.sin(d);
     n.hidden = false;
-    n.style.left = (x0 + i * (cw + gap)) + 'px';
-    n.style.top = y + 'px';
+    n.style.left = (w / 2 - cw / 2) + 'px';
+    n.style.top = (y - ch / 2) + 'px';
     n.style.width = cw + 'px';
     n.style.height = ch + 'px';
+    n.style.zIndex = String(10 + Math.round(Math.max(0, c) * 10));
+    n.style.opacity = String(0.78 + 0.22 * Math.max(0, c));
   }
 }
 
@@ -1026,14 +1141,23 @@ function setHitFace(i, flipped) {
 }
 
 function updateHits() {
-  if (!scene || !scene.ok) return;
-  const rowOk = state === S.ROW;
-  const zoomOk = state === S.ZOOM;
+  const wheelView = state === S.ROW;
+  const zoomView = state === S.ZOOM;
   for (let i = 0; i < 3; i++) {
     const n = el.hits[i];
     if (!n) continue;
-    if (rowOk || (zoomOk && zoomIndex === i)) setRect(n, scene.cardRect(i));
-    else if (n.hidden === false) n.hidden = true;
+    if (wheelView) {
+      setRect(n, scene && scene.ok ? scene.cardRect(i) : null);
+      if (scene && scene.ok) {
+        // 越靠前的牌点击区越在上层（拖动中避免侧牌盖住居中牌）
+        n.style.zIndex = String(10 + Math.round(Math.max(0, wheelFocusCos(i)) * 10));
+      }
+    } else if (zoomView && zoomIndex === i) {
+      setRect(n, scene && scene.ok ? scene.cardRect(i) : null);
+      n.style.zIndex = '30';
+    } else if (n.hidden === false) {
+      n.hidden = true;
+    }
   }
 }
 
@@ -1042,6 +1166,7 @@ function tickOverlay() {
   if (!el.deckHit) return;
 
   if (scene && scene.ok) {
+    if (state === S.ROW || state === S.ZOOM) scene.wheelApply(wheel.a);
     setRect(el.deckHit, deckShown ? scene.openingDeckRect() : null);
     updateHits();
   } else {
@@ -1050,7 +1175,7 @@ function tickOverlay() {
       ? { x: window.innerWidth / 2 - 106, y: window.innerHeight / 2 - 189, w: 212, h: 378 }
       : null);
     const r0 = el.hits[0];
-    if (r0 && r0.hidden && (state === S.ROW || state === S.ZOOM)) layoutFallbackCards();
+    if (r0 && (state === S.ROW || state === S.ZOOM)) layoutFallbackWheel();
   }
 }
 
@@ -1161,6 +1286,16 @@ function init() {
   window.addEventListener('wheel', onWheel, { passive: true });
   window.addEventListener('touchstart', onTouchStart, { passive: true });
   window.addEventListener('touchend', onTouchEnd, { passive: true });
+
+  /* 滚筒拖动：窗口级 pointer 事件（按下即跟踪，位移超阈值才算拖动） */
+  window.addEventListener('pointerdown', onWheelPtrDown);
+  window.addEventListener('pointermove', onWheelPtrMove);
+  window.addEventListener('pointerup', onWheelPtrUp);
+  window.addEventListener('pointercancel', (e) => {
+    if (!wheelPtr || e.pointerId !== wheelPtr.id) return;
+    wheelPtr = null;
+    wheelRelease(0);
+  });
 
   window.addEventListener('resize', () => { if (scene && scene.ok) scene.resize(); });
   window.addEventListener('orientationchange', () => {

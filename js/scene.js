@@ -69,10 +69,22 @@ export const CONFIG = {
 
   /* 抽牌后的三张牌 */
   dealSpin: 0.75,          // 飞行时多转的圈数（仪式感）
-  zoomHeightRatio: 0.56,   // 放大时牌高占视口比例（另有宽度上限）
-  zoomCenterY: 0.31,       // 放大时牌心所在的视口高度比例（下方留给牌义文字）
+  zoomHeightRatio: 0.52,   // 放大时牌高占视口比例（上方留出金色身份标签的位置）
+  zoomCenterY: 0.345,      // 放大时牌心所在的视口高度比例（下方留给牌义文字）
   topHeightRatio: 0.17,    // 固定到顶部时的牌高
   topCenterY: 0.135,       // 顶部牌心所在的视口高度比例
+
+  /* 三张牌滚筒：竖直排列（上中下），水平轴，左右拖动旋转
+   * 朝向与位置解耦：翻没翻只影响 flipper（牌面/牌背），滚筒只改位置 —— 拖到任何位置都保持当前朝向。 */
+  wheelStep: (Math.PI * 2) / 3,  // 相邻两牌在轮上的角距（120°：居中 + 上下各一张）
+  wheelCenterY: 0.445,     // 滚筒中心所在视口高度
+  wheelHeightRatio: 0.45,  // 居中牌高（占视口；另有宽度上限）
+  wheelRadiusRatio: 0.275, // 轮半径（占视口高）→ 侧牌竖直偏移 = sin120° × 该值 ≈ 0.24 视口高
+  wheelMinScale: 0.72,     // 侧牌缩放下限（透视还会再缩小一点）
+  wheelTiltAmp: 0.5,       // 侧牌后仰幅度（rad，按 sin(δ) 平滑过渡，居中牌为 0）
+  wheelDepth: 0.45,        // 侧牌后退深度系数（越大纵深越强）
+  wheelDim: 0.78,          // 侧牌不透明度下限（突出中间那张）
+  wheelBob: 0.007,         // 落位后的轻微起伏（世界单位，约 1.6px）
 };
 
 /* 降级档位建议值（供以后启用 autoDegrade 时使用，当前不自动应用） */
@@ -416,8 +428,9 @@ export function createTarotScene(container) {
     flipCard: () => null,
     zoomCard: () => null,
     setView: () => null,
-    getView: () => 'row',
+    getView: () => 'wheel',
     getZoomed: () => -1,
+    wheelApply: () => {},
     cardRect: () => null,
     fadeReading: () => null,
     resetReading: () => {},
@@ -1023,6 +1036,9 @@ export function createTarotScene(container) {
 
     stageGroup.position.y = Math.sin(t * 0.5) * 0.03;
 
+    /* 三张牌滚筒：按当前角度摆位（拖动 / 吸附 / 缩放都只改角度与标志位） */
+    wheelPlace(t);
+
     /* 单张牌背：原地轻摆（时间驱动）+ 指针跟随（倾斜 + 位移，柔和插值、无弹簧回弹） */
     if (openingState === OPENING.DECK && openingCards.length) {
       const nowMs = performance.now();
@@ -1184,22 +1200,80 @@ export function createTarotScene(container) {
    *   dealFromFan(cards)    扇形退场 + 三张牌从扇面位置飞到中央（背面朝上）
    *   flipCard(i)           原地绕 Y 轴翻面；逆位牌翻完后绕 Z 轴转 180°
    *   zoomCard(i, on)       原地放大 / 收回（放大时另两张退到后面并变暗）
-   *   setView('row'|'top')  三张并列 / 三张固定到顶部
+   *   setView('wheel'|'top') 滚筒 / 三张固定到顶部
    *   cardRect(i)           第 i 张的屏幕矩形（DOM 命中区与文字定位用）
    *   fadeReading(on)       三张牌整体淡出（给"炸成星光"用）
    *   resetReading()        收掉三张
    * ============================================================ */
   let topSlots = [];
-  let readingView = 'row';
+  let readingView = 'wheel';
   let zoomed = -1;
 
-  /* 三张牌落位后的轻微浮动（错开相位） */
+  /* ---------- 滚筒 ----------
+   * 角度由 app.js 持有并通过 wheelApply() 同步过来（3D 与降级模式共用同一套交互）。
+   * 第 i 张牌的相对角 δ = normalize(i·step − angle)：
+   *   δ=0    居中（最大、清晰、正对相机）
+   *   δ=±120° 在上 / 在下，靠后、缩小、后仰 —— 三张同时可见
+   * 摆位在渲染循环里逐帧写入，因此拖动 / 吸附 / 视口变化都自动生效。 */
+  let wheelAngle = 0;
+  let wheelBusy = 0;        // 飞行 / 视图切换 / 放大收回期间 > 0：滚筒暂不接管摆位
+  const wheelTmp = { x: 0, y: 0, z: 0, scale: 1, rotX: 0, cos: 1 };
+
+  function computeWheelSlot(i, out) {
+    const { w, h } = size();
+    const twoPi = Math.PI * 2;
+    let d = (i * CONFIG.wheelStep - wheelAngle) % twoPi;
+    if (d > Math.PI) d -= twoPi;
+    else if (d < -Math.PI) d += twoPi;
+    const s = Math.sin(d);
+    const c = Math.cos(d);
+    const cardHpx = Math.min(h * CONFIG.wheelHeightRatio, w * 1.62);
+    const Rpx = h * CONFIG.wheelRadiusRatio;
+    const yPx = h * CONFIG.wheelCenterY - Rpx * s;      // δ>0 → 在上方（屏幕 y 更小）
+    const z = -(1 - c) * pixelsToWorld(Rpx, 0) * CONFIG.wheelDepth;
+    const p = screenToWorld(w / 2, yPx, z, wheelVec);
+    out.x = p.x;
+    out.y = p.y;
+    out.z = z;
+    out.scale = (pixelsToWorld(cardHpx, 0) / CARD_H)
+      * (CONFIG.wheelMinScale + (1 - CONFIG.wheelMinScale) * Math.max(0, c));
+    out.rotX = -CONFIG.wheelTiltAmp * s;                // 上牌后仰、下牌前倾（cylinder 观感）
+    out.cos = c;
+    return out;
+  }
+
+  const wheelVec = new THREE.Vector3();
+  const wheelSlotTmps = [ {}, {}, {} ];
+  let wheelLastOp = [ -1, -1, -1 ];
+
+  /* 渲染循环里的滚筒摆位（放大 / 飞行 / 顶部视图时不接管） */
+  function wheelPlace(t) {
+    if (!current.length || readingView !== 'wheel' || zoomed >= 0 || wheelBusy > 0) return;
+    for (let i = 0; i < current.length; i++) {
+      const c = current[i];
+      if (!c || c.flying) continue;
+      const sl = computeWheelSlot(i, wheelSlotTmps[i]);
+      c.root.position.set(sl.x, sl.y + Math.sin(t * 0.6 + i * 2.1) * CONFIG.wheelBob, sl.z);
+      c.root.rotation.set(sl.rotX, 0, 0);
+      c.root.scale.setScalar(sl.scale);
+      const op = CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, sl.cos);
+      if (Math.abs(op - wheelLastOp[i]) > 0.01) {
+        c.setOpacity(op);
+        wheelLastOp[i] = op;
+      }
+    }
+  }
+
+  /* app.js 每帧同步滚筒角度 */
+  api.wheelApply = function (a) { wheelAngle = a || 0; };
+
+  /* 三张牌落位后的轻微浮动 —— 仅顶部视图需要（滚筒的起伏在摆位里逐帧计算） */
   function startRowFloat(mode) {
+    if ((mode || readingView) !== 'top') return;
     const gsap = window.gsap;
     if (!gsap) return;
-    const set = (mode || readingView) === 'top' ? topSlots : slots;
     current.forEach((c, i) => {
-      const s = set[i];
+      const s = topSlots[i];
       if (!s) return;
       if (c.floatTween) c.floatTween.kill();
       c.floatTween = gsap.to(c.root.position, {
@@ -1215,8 +1289,12 @@ export function createTarotScene(container) {
     current.forEach((c) => { if (c.floatTween) { c.floatTween.kill(); c.floatTween = null; } });
   }
 
-  /* 抽牌：扇形旋转缩小退场，同时三张牌从扇面中部的位置飞向中央 */
-  api.dealFromFan = async function (cards) {
+  /* 抽牌：扇形旋转缩小退场，同时三张牌飞向滚筒（背面朝上）。
+   * opts.fromDeck  起点改用单张牌背的位置（历史回看进入时用，那时没有扇形）
+   * opts.quick     0.6 倍时长（历史进入的过渡要快） */
+  api.dealFromFan = async function (cards, opts) {
+    const o = opts || {};
+    const speed = o.quick ? 0.6 : 1;
     const gsap = window.gsap;
     const backTex = await loadTexture('cards/back.jpg', anisotropy);
     const faces = await Promise.all(cards.map((c) => loadTexture(c.src, anisotropy)));
@@ -1224,65 +1302,86 @@ export function createTarotScene(container) {
     api.clear();
     stopRowFloat();
     zoomed = -1;
-    readingView = 'row';
+    wheelLastOp = [-1, -1, -1];
+    readingView = 'wheel';
 
-    /* 1) 扇形退场：旋转 + 缩小 + 淡出 */
-    if (openingGroup && openingCards.length) {
+    /* 1) 扇形退场：旋转 + 缩小 + 淡出（openingVanish 已处理过扇形时跳过） */
+    if (openingState === OPENING.FAN && openingGroup && openingCards.length) {
       openingState = OPENING.EXIT;
       openingCards.forEach((c, i) => {
         if (!gsap) { c.setOpacity(0); return; }
-        const d = 0.05 * Math.abs(i - (openingCards.length - 1) / 2);
-        gsap.to(c.root.rotation, { z: (c.root.rotation.z || 0) + (i % 2 ? 0.55 : -0.55), duration: 1.05, ease: 'power2.in', delay: d });
-        gsap.to(c.root.scale, { x: 0.0001, y: 0.0001, z: 0.0001, duration: 0.95, ease: 'power2.in', delay: d });
+        const d = 0.05 * Math.abs(i - (openingCards.length - 1) / 2) * speed;
+        gsap.to(c.root.rotation, { z: (c.root.rotation.z || 0) + (i % 2 ? 0.55 : -0.55), duration: 1.05 * speed, ease: 'power2.in', delay: d });
+        gsap.to(c.root.scale, { x: 0.0001, y: 0.0001, z: 0.0001, duration: 0.95 * speed, ease: 'power2.in', delay: d });
         gsap.to({ v: 1 }, {
-          v: 0, duration: 0.9, ease: 'power2.in', delay: d,
+          v: 0, duration: 0.9 * speed, ease: 'power2.in', delay: d,
           onUpdate: function () { c.setOpacity(this.targets()[0].v); },
         });
       });
     }
 
-    /* 2) 三张牌：起点取扇面中间三张的位置，终点是中央的三个槽位 */
+    /* 2) 三张牌：起点取扇面中间三张（或单张牌背）的位置，终点是滚筒槽位 */
     const n = fanSlots.length || 1;
     const mid = Math.floor(n / 2);
     const src = [mid - 1, mid, mid + 1].map((i) => fanSlots[Math.max(0, Math.min(n - 1, i))]);
+    const turn = o.quick ? 0.5 : CONFIG.dealSpin;   // 起始多转的圈数（仪式感）
 
     current = cards.map((c, i) => {
       const card = buildCard(backTex, faces[i], anisotropy);
       card.reversed = !!c.reversed;
       card.flipped = false;
-      card.root.scale.setScalar((src[i] && src[i].scale) || fanScale || cardScale);
-      const s = src[i] || { x: 0, y: 0, z: 0, rotZ: 0 };
-      card.root.position.set(s.x, s.y, s.z);
-      // 起始多转 3/4 圈，飞行过程里转回来 → 有仪式感
-      card.root.rotation.set(CONFIG.fanLean, slots[i].rotY - Math.PI * 2 * CONFIG.dealSpin, s.rotZ || 0);
+      const s0 = o.fromDeck
+        ? { x: deckSlot.x + (i - 1) * pixelsToWorld(30, 0), y: deckSlot.y, z: deckSlot.z, scale: deckScale, rotZ: (i - 1) * 0.14 }
+        : (src[i] || { x: 0, y: 0, z: 0, rotZ: 0, scale: fanScale || cardScale });
+      card.root.scale.setScalar(s0.scale || cardScale);
+      card.root.position.set(s0.x, s0.y, s0.z);
+      card.root.rotation.set(CONFIG.fanLean, -Math.PI * 2 * turn, s0.rotZ || 0);
       card.setOpacity(0);
       cardGroup.add(card.root);
 
       if (!gsap) {
-        card.root.scale.setScalar(slots[i].scale);
-        card.root.position.set(slots[i].x, slots[i].y, slots[i].z);
-        card.root.rotation.set(0, slots[i].rotY, 0);
-        card.setOpacity(1);
+        const t = computeWheelSlot(i, wheelSlotTmps[i]);
+        card.root.scale.setScalar(t.scale);
+        card.root.position.set(t.x, t.y, t.z);
+        card.root.rotation.set(t.rotX, 0, 0);
+        card.setOpacity(CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, t.cos));
+        wheelLastOp[i] = -1;
       }
       return card;
     });
 
-    if (!gsap) { startRowFloat('row'); return current; }
-
-    const tl = gsap.timeline({
-      onComplete: () => { current.forEach((c) => { c.flying = false; }); startRowFloat('row'); },
+    /* 目标：滚筒槽位（角度已由 app.js 归零 → 第 0 张居中） */
+    const targets = [0, 1, 2].map((i) => {
+      const t = {};
+      computeWheelSlot(i, t);
+      return t;
     });
 
-    tl.to({ v: 0 }, {
-      v: 1, duration: 0.5, ease: 'power2.out',
-      onUpdate: function () { current.forEach((c) => c.setOpacity(this.targets()[0].v)); },
-    }, 0.1);
+    if (!gsap) { wheelBusy = 0; return current; }
+    wheelBusy++;
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        current.forEach((c) => { c.flying = false; });
+        wheelBusy = Math.max(0, wheelBusy - 1);
+      },
+    });
+
+    /* 逐张淡入到各自的滚筒不透明度（居中 1，侧牌 wheelDim），落位后无缝交给滚筒摆位 */
+    current.forEach((c, i) => {
+      const tOp = CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, targets[i].cos);
+      tl.to({ v: 0 }, {
+        v: tOp, duration: 0.55 * speed, ease: 'power2.out',
+        onUpdate: function () { c.setOpacity(this.targets()[0].v); },
+      }, 0.1 + 0.06 * i);
+    });
 
     current.forEach((c, i) => {
-      const s = slots[i];
-      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25, ease: 'power3.out' }, 0.24 + 0.16 * i);
-      tl.to(c.root.rotation, { x: 0, y: s.rotY, z: 0, duration: 1.25, ease: 'power3.out' }, 0.24 + 0.16 * i);
-      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.2, ease: 'power2.inOut' }, 0.24 + 0.16 * i);
+      const s = targets[i];
+      const at = 0.24 * speed + 0.16 * speed * i;
+      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25 * speed, ease: 'power3.out' }, at);
+      tl.to(c.root.rotation, { x: s.rotX, y: 0, z: 0, duration: 1.25 * speed, ease: 'power3.out' }, at);
+      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.2 * speed, ease: 'power2.inOut' }, at);
     });
 
     return tl;
@@ -1314,13 +1413,19 @@ export function createTarotScene(container) {
     c.spin.rotation.z = c.reversed ? Math.PI : 0;
   };
 
-  /* 放大 / 收回 */
+  /* 放大 / 收回（从滚筒放大，收回时回到当前角度下的滚筒槽位） */
   api.zoomCard = function (i, on) {
     const gsap = window.gsap;
     const c = current[i];
     if (!c) return null;
     const { w, h } = size();
     const zPlane = 0;
+
+    const wheelTarget = (j) => {
+      const t = {};
+      computeWheelSlot(j, t);
+      return t;
+    };
 
     if (!gsap) {
       if (on) {
@@ -1332,11 +1437,14 @@ export function createTarotScene(container) {
         c.root.rotation.set(0, 0, 0);
         zoomed = i;
       } else {
-        const s = slots[i];
-        c.root.scale.setScalar(s.scale);
-        c.root.position.set(s.x, s.y, s.z);
-        c.root.rotation.set(0, s.rotY, 0);
-        current.forEach((o) => o.setOpacity(1));
+        current.forEach((o, j) => {
+          const t = wheelTarget(j);
+          o.root.scale.setScalar(t.scale);
+          o.root.position.set(t.x, t.y, t.z);
+          o.root.rotation.set(t.rotX, 0, 0);
+          o.setOpacity(CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, t.cos));
+        });
+        wheelLastOp = [-1, -1, -1];
         zoomed = -1;
       }
       return null;
@@ -1346,64 +1454,77 @@ export function createTarotScene(container) {
     const tl = gsap.timeline();
 
     if (on) {
-      zoomed = i;
+      zoomed = i;                       // 先置放大态：滚筒摆位随即让位
       const targetH = Math.min(h * CONFIG.zoomHeightRatio, w * 1.529);
       const s = targetH / worldToPixels(CARD_H, zPlane);
       const p = screenToWorld(w / 2, h * CONFIG.zoomCenterY, zPlane, new THREE.Vector3());
       tl.to(c.root.scale, { x: s, y: s, z: s, duration: 0.9, ease: 'power3.inOut' }, 0);
       tl.to(c.root.position, { x: p.x, y: p.y, z: zPlane, duration: 0.9, ease: 'power3.inOut' }, 0);
       tl.to(c.root.rotation, { x: 0, y: 0, z: 0, duration: 0.9, ease: 'power3.inOut' }, 0);
-      // 另两张退到后面并变暗
+      // 另两张退到后面并隐去（放大态下不参与滚筒摆位）
       current.forEach((o, j) => {
         if (j === i) return;
         tl.to(o.root.position, { z: -1.8, duration: 0.8, ease: 'power2.inOut' }, 0);
         tl.to({ v: o.materials[0].opacity }, {
-          v: 0.1, duration: 0.7,
+          v: 0.05, duration: 0.7,
           onUpdate: function () { o.setOpacity(this.targets()[0].v); },
         }, 0);
       });
     } else {
-      zoomed = -1;
       current.forEach((o, j) => {
-        const s = slots[j];
-        tl.to(o.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
-        tl.to(o.root.position, { x: s.x, y: s.y, z: s.z, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
-        tl.to(o.root.rotation, { x: 0, y: s.rotY, z: 0, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        const t = wheelTarget(j);
+        tl.to(o.root.scale, { x: t.scale, y: t.scale, z: t.scale, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        tl.to(o.root.position, { x: t.x, y: t.y, z: t.z, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        tl.to(o.root.rotation, { x: t.rotX, y: 0, z: 0, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
         tl.to({ v: o.materials[0].opacity }, {
-          v: 1, duration: 0.5,
+          v: CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, t.cos),
+          duration: 0.5,
           onUpdate: function () { o.setOpacity(this.targets()[0].v); },
         }, 0);
       });
-      tl.add(() => { readingView = 'row'; startRowFloat('row'); });
+      tl.add(() => {
+        wheelLastOp = [-1, -1, -1];
+        zoomed = -1;                    // 落位完成后才把滚筒摆位交回去
+      });
     }
     return tl;
   };
 
-  /* 三张牌在「并列」与「固定到顶部」之间切换 */
+  /* 三张牌在「滚筒」与「固定到顶部」之间切换 */
   api.setView = function (mode) {
     const gsap = window.gsap;
     if (!current.length) { readingView = mode; return null; }
     if (mode === 'top') computeTopSlots();      // 用当前视口重算，保证贴顶
-    const set = mode === 'top' ? topSlots : slots;
     stopRowFloat();
     if (!gsap) {
       current.forEach((c, i) => {
-        const s = set[i];
+        const s = mode === 'top' ? topSlots[i] : computeWheelSlot(i, wheelSlotTmps[i]);
         c.root.scale.setScalar(s.scale);
         c.root.position.set(s.x, s.y, s.z);
-        c.root.rotation.set(0, s.rotY, 0);
+        c.root.rotation.set(mode === 'top' ? 0 : s.rotX, mode === 'top' ? s.rotY : 0, 0);
       });
       readingView = mode;
+      wheelLastOp = [-1, -1, -1];
       return null;
     }
+    wheelBusy++;
     const tl = gsap.timeline({
-      onComplete: () => { readingView = mode; startRowFloat(mode); },
+      onComplete: () => {
+        readingView = mode;
+        wheelLastOp = [-1, -1, -1];
+        wheelBusy = Math.max(0, wheelBusy - 1);
+        if (mode === 'top') startRowFloat('top');
+      },
     });
     current.forEach((c, i) => {
-      const s = set[i];
+      const s = mode === 'top' ? topSlots[i] : computeWheelSlot(i, wheelSlotTmps[i]);
       tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
       tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
-      tl.to(c.root.rotation, { x: 0, y: s.rotY, z: 0, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
+      tl.to(c.root.rotation, {
+        x: mode === 'top' ? 0 : s.rotX,
+        y: mode === 'top' ? s.rotY : 0,
+        z: 0, duration: 0.95, ease: 'power3.inOut',
+      }, 0.05 * i);
     });
     return tl;
   };
@@ -1436,8 +1557,10 @@ export function createTarotScene(container) {
   api.resetReading = function () {
     stopRowFloat();
     api.clear();
-    readingView = 'row';
+    readingView = 'wheel';
     zoomed = -1;
+    wheelBusy = 0;
+    wheelLastOp = [-1, -1, -1];
   };
 
   api.setScrollProgress = function (p) {
@@ -1446,12 +1569,11 @@ export function createTarotScene(container) {
 
   api.resize = function () {
     layout();
-    // 三张牌也按新尺寸复位（放大态与顶部态用各自的落位）
-    if (current.length) {
-      const set = readingView === 'top' ? topSlots : slots;
+    // 滚筒视图的摆位逐帧重算，无需处理；只有顶部视图需要按新尺寸复位
+    if (current.length && readingView === 'top') {
       current.forEach((c, i) => {
         if (i === zoomed) return;
-        const s = set[i];
+        const s = topSlots[i];
         if (!s) return;
         c.root.scale.setScalar(s.scale);
         c.root.position.set(s.x, s.y, s.z);
