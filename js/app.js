@@ -830,13 +830,22 @@ function clearAiText() {
   el.aiText.classList.remove('is-on');
 }
 
-/* 解读分语种：含 ≥2 个 CJK 字符的段落归中文，其余归英文。
+/* 解读分语种：先按空行分段（段内偶发的软换行合并回一段），
+ * 再按语言归类 —— 含 ≥2 个 CJK 字符的段归中文，其余归英文。
  * 旧记录是纯中文，走同一路径（英文组为空 → 只显示中文）。 */
 function splitReading(text) {
-  const paras = String(text).split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  const blocks = String(text)
+    .split(/\r?\n\s*\r?\n/)                       // 空行 = 段落边界
+    .map((b) => {
+      const joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (!joined.length) return '';
+      const cjk = (b.match(/[\u4e00-\u9fff]/g) || []).length;
+      return joined.join(cjk >= 2 ? '' : ' ');      // 英文换行补空格，中文直接连
+    })
+    .filter(Boolean);
   const en = [];
   const cn = [];
-  paras.forEach((p) => {
+  blocks.forEach((p) => {
     const cjk = (p.match(/[\u4e00-\u9fff]/g) || []).length;
     (cjk >= 2 ? cn : en).push(p);
   });
