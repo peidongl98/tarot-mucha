@@ -749,7 +749,7 @@ function hideMeaning() {
   el.cardRead.classList.remove('is-on');
 }
 
-/* 底部星光引导（三张都翻开后出现） */
+/* 底部星光引导 + 滚动提示（三张都翻开后一起出现） */
 function buildStarHint() {
   if (!el.starHint || el.starHint.childElementCount) return;
   for (let i = 0; i < 15; i++) {
@@ -761,8 +761,8 @@ function buildStarHint() {
 }
 
 function showStarHint(on) {
-  if (!el.starHint) return;
-  el.starHint.classList.toggle('is-on', !!on);
+  if (el.starHint) el.starHint.classList.toggle('is-on', !!on);
+  if (el.scrollHint) el.scrollHint.classList.toggle('is-on', !!on);
 }
 
 /* ============================================================
@@ -1264,6 +1264,7 @@ function cacheDom() {
   el.readText = document.getElementById('readText');
 
   el.starHint = document.getElementById('starHint');
+  el.scrollHint = document.getElementById('scrollHint');
   el.wheelLabel = document.getElementById('wheelLabel');
   el.readingView = document.getElementById('readingView');
   el.aiRing = document.getElementById('aiRing');

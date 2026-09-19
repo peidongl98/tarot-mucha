@@ -548,6 +548,29 @@ body.no-3d .card-hit img { visibility: visible; }
 
 .star-hint.is-on { opacity: 1; }
 
+/* ---------- 滚动提示（三张全翻完，与星光引导一起出现） ---------- */
+.scroll-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 13.5%;
+  transform: translateX(-50%);
+  margin: 0;
+  z-index: 3;
+  text-align: center;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.4s ease 0.5s;
+}
+
+.scroll-hint.is-on { opacity: 0.88; }
+
 /* ---------- 滚筒居中标签：居中牌的身份（过去 / 现在 / 未来） ---------- */
 .wheel-label {
   position: fixed;
