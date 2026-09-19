@@ -22,8 +22,9 @@ const GLM_MODEL = 'glm-4.7-flash';
  * 设为 null 则只用主模型（接受高峰期报错）。 */
 const GLM_FALLBACK_MODEL = 'glm-4.6';
 
-/* 总预算 30s；留 2s 余量给 Cloudflare 侧收尾 */
-const TOTAL_BUDGET_MS = 28000;
+/* 总预算 40s：双语（英 + 中）的生成长度约为单语的两倍，30s 会把两个模型都掐死在半路
+ * （实测双双超时 → 504）。前端等待 55s，留足余量。 */
+const TOTAL_BUDGET_MS = 40000;
 const MAX_QUESTION_LEN = 200;
 /* 双语解读（英 + 中）比单语长，留足生成空间 */
 const MAX_TOKENS = 1800;
@@ -35,7 +36,8 @@ const RETRY_DELAYS = [900, 1800];
  * 主模型 9s：它正常只需 4–6s，超时说明正被限流，尽快让位给备用模型，
  * 而不是一口吃掉全部预算（实测会造成最终 504）。
  * 备用模型 16s：它是最后一关，给足时间。 */
-const MODEL_CAPS = [9000, 16000];
+/* 主模型 15s：双语正常 8–14s；备用模型 22s：它是最后一关，给足时间。 */
+const MODEL_CAPS = [15000, 22000];
 
 /* 双语解读：先英文、空一行、再中文；段落一一对应；不加任何标签 */
 const SYSTEM_PROMPT = `你是「穆夏塔罗」的塔罗解读师，沉稳、优雅、静谧。

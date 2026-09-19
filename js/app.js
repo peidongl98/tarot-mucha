@@ -918,7 +918,7 @@ async function askAi() {
   };
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 45000);
+  const timer = setTimeout(() => ctrl.abort(), 55000);   // 双语生成更长，与 Function 预算(40s)配套
 
   try {
     const res = await fetch('/api/tarot', {
