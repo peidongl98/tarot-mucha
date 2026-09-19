@@ -844,12 +844,16 @@ function splitReading(text) {
     .filter(Boolean);
   const enRaw = [];
   const cn = [];
+  let enNote = '';
+  let cnNote = '';
   blocks.forEach((p) => {
+    if (!enNote && /for entertainment/i.test(p)) { enNote = p; return; }   // 免责先摘出，不参与正文配对
+    if (!cnNote && /仅供娱乐参考/.test(p)) { cnNote = p; return; }
     const cjk = (p.match(/[\u4e00-\u9fff]/g) || []).length;
     (cjk >= 2 ? cn : enRaw).push(p);
   });
 
-  /* 兜底归并：模型偶发把英文段按空行多拆一倍（实测 8 段 vs 中文 4 段）。
+  /* 兜底归并：模型偶发把英文段按空行多拆一倍。
    * 中英段落按顺序一一对应 —— 当英文段数是中文的整数倍时，按序均匀合并回对应段。 */
   let en = enRaw;
   if (cn.length > 0 && enRaw.length > cn.length && enRaw.length % cn.length === 0) {
@@ -859,20 +863,22 @@ function splitReading(text) {
       en.push(enRaw.slice(i * k, (i + 1) * k).join(' '));
     }
   }
-  return { en, cn };
+  return { en, cn, enNote, cnNote };
 }
 
 /* 解读文字（中英双语）：英文组在上、中文组在下，从光圈位置浮出 +
  * 一次涟漪扩散 + 段落逐段浮现；浮现完成后光圈淡出隐去（问题 2）。 */
 function showAiText(text, instant) {
-  const { en, cn } = splitReading(text);
+  const r = splitReading(text);
+  const en = r.en;
+  const cn = r.cn;
   el.aiText.textContent = '';
   const gEn = elNew('div', 'ai-group ai-group-en');
   const gCn = elNew('div', 'ai-group ai-group-cn');
   en.forEach((t) => gEn.appendChild(elNew('p', 'ai-en', t)));
-  const isNote = (t) => /仅供娱乐参考|for entertainment/i.test(t);
-  en.forEach((t) => gEn.appendChild(elNew('p', isNote(t) ? 'ai-note ai-note-en' : 'ai-en', t)));
-  cn.forEach((t) => gCn.appendChild(elNew('p', isNote(t) ? 'ai-note' : null, t)));
+  cn.forEach((t) => gCn.appendChild(elNew('p', null, t)));
+  if (r.enNote) gEn.appendChild(elNew('p', 'ai-note ai-note-en', r.enNote));
+  if (r.cnNote) gCn.appendChild(elNew('p', 'ai-note', r.cnNote));
   if (gEn.childElementCount) el.aiText.appendChild(gEn);
   if (gCn.childElementCount) el.aiText.appendChild(gCn);
   el.aiText.classList.add('is-on');
