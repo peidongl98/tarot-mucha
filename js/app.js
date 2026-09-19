@@ -1120,15 +1120,19 @@ async function restoreRecord(rec) {
   wheel.a = 0;
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
 
+  // 问题 6：单张牌快速展开 → 旋转 → 淡出；同时那次的
+  // 三张牌从牌背原位置飞出，落到滚筒槽位（三张已按记录翻开）
+  const vanishP = (scene && scene.ok) ? scene.openingVanish() : Promise.resolve();
   if (scene && scene.ok) {
     await scene.dealFromFan(lastReading.map((c) => ({
       src: 'cards/' + TAROT_BY_ID[c.id].file,
       reversed: !!c.reversed,
-    })));
+    })), { fromDeck: true, quick: true });
     for (let i = 0; i < 3; i++) scene.presetFlipped(i);
   } else {
     for (let i = 0; i < 3; i++) setHitFace(i, true);
   }
+  await vanishP;
 
   // 直接进入滚筒（先看牌）；下滑才看那次的解读
   state = S.ROW;

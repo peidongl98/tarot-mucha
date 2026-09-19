@@ -418,6 +418,7 @@ export function createTarotScene(container) {
     cardBottomY: () => null,
     updateMist: () => {},
     openingShowDeck: () => Promise.resolve(),
+    openingVanish: () => Promise.resolve(),
     openingFan: () => null,
     openingDeckRect: () => null,
     openingTilt: () => ({ x: 0, y: 0, degX: 0, degY: 0, targetX: 0, targetY: 0, shiftX: 0, shiftY: 0 }),
@@ -891,6 +892,67 @@ export function createTarotScene(container) {
     shiftX: worldToPixels(shiftNow.x, 0),
     shiftY: -worldToPixels(shiftNow.y, 0),
   });
+
+  /* 历史回看进入：单张牌背快速展开（小幅扇形）→ 旋转 + 缩小 + 淡出。
+   * 从牌堆态（DECK）或扇形态（FAN）都能走；返回 Promise，动画结束后牌全部收场。 */
+  api.openingVanish = function () {
+    const gsap = window.gsap;
+    if (!openingGroup || !openingCards.length || openingState === OPENING.EXIT) {
+      return Promise.resolve();
+    }
+    openingStopFloat();
+    tiltReset();
+    const fromFan = openingState === OPENING.FAN;
+    openingState = OPENING.EXIT;
+
+    if (!gsap) {
+      openingCards.forEach((c) => { c.root.visible = false; c.setOpacity(0); });
+      return Promise.resolve();
+    }
+
+    return new Promise((res) => {
+      const tl = gsap.timeline({
+        onComplete: () => {
+          openingCards.forEach((c) => { c.root.visible = false; c.setOpacity(0); });
+          res();
+        },
+      });
+
+      if (!fromFan) {
+        // 先快速展开成小幅扇形（0.3s）
+        openingLayout();
+        const count = fanSlots.length;
+        openingCards.forEach((c, i) => {
+          const s = fanSlots[i];
+          if (!s) { c.root.visible = false; c.setOpacity(0); return; }
+          c.root.visible = true;
+          c.setOpacity(1);
+          c.root.scale.setScalar(deckScale);
+          c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z - i * 0.012);
+          c.root.rotation.set(0, 0, (i - (count - 1) / 2) * 0.016);
+        });
+        openingCards.forEach((c, i) => {
+          const s = fanSlots[i];
+          if (!s) return;
+          tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 0.3, ease: 'power2.out' }, 0);
+          tl.to(c.root.rotation, { x: CONFIG.fanLean, z: s.rotZ * 0.8, duration: 0.3, ease: 'power2.out' }, 0);
+          tl.to(c.root.scale, { x: fanScale * 0.85, y: fanScale * 0.85, z: fanScale * 0.85, duration: 0.28, ease: 'power2.out' }, 0);
+        });
+      }
+
+      // 再旋转 + 缩小 + 淡出（0.5s，外侧牌稍错开）
+      const n = openingCards.length;
+      openingCards.forEach((c, i) => {
+        const d = fromFan ? 0.04 * Math.abs(i - (n - 1) / 2) : 0.26 + 0.035 * Math.abs(i - (n - 1) / 2);
+        tl.to(c.root.rotation, { y: (i % 2 ? 1 : -1) * 1.15, duration: 0.5, ease: 'power2.in' }, d);
+        tl.to(c.root.scale, { x: 0.001, y: 0.001, z: 0.001, duration: 0.46, ease: 'power2.in' }, d);
+        tl.to({ v: c.materials[0].opacity }, {
+          v: 0, duration: 0.42, ease: 'power2.in',
+          onUpdate: function () { c.setOpacity(this.targets()[0].v); },
+        }, d);
+      });
+    });
+  };
 
   /* 初始态：屏幕中央一张牌背 */
   api.openingShowDeck = async function () {
