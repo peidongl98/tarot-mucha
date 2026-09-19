@@ -46,8 +46,8 @@
   </div>
 </noscript>
 
-<!-- 标题爆散后的星光层 -->
-<div id="burstLayer" class="burst-layer" aria-hidden="true"></div>
+<!-- 标题淡出后散开的星光：一块 canvas，空闲时 display:none，不占合成开销 -->
+<canvas id="burstLayer" class="burst-layer" aria-hidden="true"></canvas>
 
 <!-- 牌背点击区：canvas 是 pointer-events:none，所以用透明按钮对齐到 3D 牌背；
      无 3D 时同一元素直接显示牌背图，交互保持一致 -->

@@ -126,7 +126,7 @@ function fillSlotLabels(cards) {
  * 因此爆散是从笔画里散开，而不是从一个矩形里冒出。
  * ============================================================ */
 
-function sampleTitlePoints(node, rect) {
+function sampleTitlePoints(node, rect, limit) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const cw = Math.max(1, Math.round(rect.width * dpr));
   const chh = Math.max(1, Math.round(rect.height * dpr));
@@ -170,7 +170,103 @@ function sampleTitlePoints(node, rect) {
     const j = Math.floor(Math.random() * (i + 1));
     const t = pts[i]; pts[i] = pts[j]; pts[j] = t;
   }
-  return pts.slice(0, 260);
+  return pts.slice(0, limit || 260);
+}
+
+/* ============================================================
+ * 开场 · 标题淡出 + 少量星光散开
+ *
+ * 旧实现：260 个 DOM 节点、每颗带双层 box-shadow，GSAP 逐颗缩放 ——
+ * 缩放会让模糊阴影每帧重新栅格化，实测爆散期间均帧从 28.8ms 涨到 50.6ms、
+ * 21 帧超过 50ms、最长一帧 173ms。
+ * 现在：标题 0.8s 淡出 + 一块 canvas 一次画完全部星点
+ * （1 个合成层、0 DOM 变更、0 box-shadow、26 颗星），空闲时整块 canvas 不显示。
+ * ============================================================ */
+
+const BURST_COUNT = 26;          // 星光数量（需求：不要密集粒子爆炸）
+const BURST_LIFE = [0.7, 1.3];   // 单颗星存活时长范围（秒）
+
+let burstRaf = 0;
+let burstSprite = null;
+
+/* 预渲染一颗柔光星点，之后只 drawImage，避免每帧建渐变 */
+function getStarSprite() {
+  if (burstSprite) return burstSprite;
+  const s = 64;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  const g = cv.getContext('2d');
+  const rg = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  rg.addColorStop(0, 'rgba(255,252,246,1)');
+  rg.addColorStop(0.3, 'rgba(237,232,224,0.85)');
+  rg.addColorStop(0.55, 'rgba(201,169,97,0.45)');
+  rg.addColorStop(1, 'rgba(201,169,97,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, s, s);
+  burstSprite = cv;
+  return cv;
+}
+
+function startBurst(points, rect) {
+  const cv = el.burstLayer;
+  if (!cv || !cv.getContext) return;
+  const ctx = cv.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  cv.style.width = W + 'px';
+  cv.style.height = H + 'px';
+  cv.style.display = 'block';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const sprite = getStarSprite();
+  const stars = points.map((p) => {
+    const a = Math.random() * Math.PI * 2;
+    const d = 44 + Math.random() * 150;
+    return {
+      x: rect.left + p.x,
+      y: rect.top + p.y,
+      vx: Math.cos(a) * d,
+      vy: Math.sin(a) * d + 26,       // 略偏下：散进标题下方的空旷暗区
+      r: 3.4 + Math.random() * 3.4,
+      t: 0,
+      life: BURST_LIFE[0] + Math.random() * (BURST_LIFE[1] - BURST_LIFE[0]),
+    };
+  });
+
+  let last = 0;
+  const step = (now) => {
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
+    last = now;
+    ctx.clearRect(0, 0, W, H);
+    let alive = 0;
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      s.t += dt;
+      const k = s.t / s.life;
+      if (k >= 1) continue;
+      alive++;
+      const out = 1 - Math.pow(1 - k, 2.4);       // 先快后慢地外扩
+      const x = s.x + s.vx * out;
+      const y = s.y + s.vy * out + 12 * out * out;
+      const r = s.r * (0.55 + 0.8 * out) * (1 - 0.35 * k);
+      ctx.globalAlpha = Math.max(0, Math.pow(1 - k, 1.5));
+      ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+    }
+    ctx.globalAlpha = 1;
+    if (alive) {
+      burstRaf = requestAnimationFrame(step);
+    } else {
+      burstRaf = 0;
+      ctx.clearRect(0, 0, W, H);
+      cv.style.display = 'none';                  // 空闲时整块 canvas 不参与合成
+    }
+  };
+  if (burstRaf) cancelAnimationFrame(burstRaf);
+  burstRaf = requestAnimationFrame(step);
 }
 
 async function explodeTitle() {
@@ -182,36 +278,23 @@ async function explodeTitle() {
   try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) { /* 忽略 */ }
 
   const rect = node.getBoundingClientRect();
-  const points = sampleTitlePoints(node, rect);
-  node.style.visibility = 'hidden';
+  const points = sampleTitlePoints(node, rect, BURST_COUNT);
 
-  const gsap = window.gsap;
-  if (!gsap || !points.length || REDUCED || !el.burstLayer) return;
+  if (REDUCED) { node.style.visibility = 'hidden'; return; }
 
-  const frag = document.createDocumentFragment();
-  const nodes = points.map((p) => {
-    const s = elNew('span', 'burst-dot');
-    s.style.left = (rect.left + p.x) + 'px';
-    s.style.top = (rect.top + p.y) + 'px';
-    frag.appendChild(s);
-    return s;
-  });
-  el.burstLayer.appendChild(frag);
-
-  nodes.forEach((n) => {
-    const a = Math.random() * Math.PI * 2;
-    const d = 58 + Math.random() * 210;
-    gsap.to(n, {
-      x: Math.cos(a) * d,
-      y: Math.sin(a) * d + 34,
+  // 标题淡出 0.8s（旧实现是瞬间隐藏，太生硬）
+  if (window.gsap) {
+    window.gsap.to(node, {
       opacity: 0,
-      scale: 0.35,
-      duration: 1.25 + Math.random() * 1.15,
-      ease: 'power2.out',
-      delay: Math.random() * 0.22,
-      onComplete: () => { if (n.parentNode) n.parentNode.removeChild(n); },
+      duration: 0.8,
+      ease: 'power2.inOut',
+      onComplete: () => { node.style.visibility = 'hidden'; },
     });
-  });
+  } else {
+    node.style.visibility = 'hidden';
+  }
+
+  if (points.length) startBurst(points, rect);
 }
 
 /* ============================================================
@@ -309,7 +392,24 @@ window.TarotOrbs = {
 
 /* ============================================================
  * 开场 · 点击牌背展开扇形
+ * 拖动（用于看牌的倾斜跟随）不算点击：位移超过阈值就不展开
  * ============================================================ */
+
+const DECK_DRAG_SLOP = 12;      // 按下到抬起的位移阈值（px）
+let deckPressAt = null;
+
+function onDeckPointerDown(e) {
+  deckPressAt = { x: e.clientX, y: e.clientY };
+}
+
+function onDeckClick(e) {
+  const moved = deckPressAt
+    ? Math.hypot(e.clientX - deckPressAt.x, e.clientY - deckPressAt.y)
+    : 0;
+  deckPressAt = null;
+  if (moved > DECK_DRAG_SLOP) return;
+  openFan();
+}
 
 function openFan() {
   if (openingOpened) return;
@@ -703,7 +803,10 @@ function init() {
   }
 
   /* ---- 事件 ---- */
-  if (el.deckHit) el.deckHit.addEventListener('click', openFan);
+  if (el.deckHit) {
+    el.deckHit.addEventListener('pointerdown', onDeckPointerDown);
+    el.deckHit.addEventListener('click', onDeckClick);
+  }
   if (el.ringBtn) el.ringBtn.addEventListener('click', onRingClick);
   if (el.question) {
     el.question.addEventListener('input', () => {
@@ -730,6 +833,13 @@ function init() {
   tickOverlay();
   armCameraScroll();
 }
+
+/* 只读诊断口：调参（漂浮幅度 / 倾角上限）与自动化验证用，不参与任何逻辑 */
+window.TarotDebug = {
+  sceneReady: () => !!(scene && scene.ok),
+  deckRect: () => (scene && scene.openingDeckRect ? scene.openingDeckRect() : null),
+  tilt: () => (scene && scene.openingTilt ? scene.openingTilt() : null),
+};
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

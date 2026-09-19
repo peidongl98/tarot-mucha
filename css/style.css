@@ -405,25 +405,15 @@ body.no-3d .deck-hit-img {
 }
 
 /* ---------- 标题爆散后的星光 ---------- */
+/* ---------- 标题星光层：一块 canvas（不是一堆 DOM 星点） ----------
+   旧实现是 260 个 span + 双层 box-shadow，缩放时每帧重新栅格化模糊阴影导致掉帧；
+   现在全部星光一次画进这块 canvas，空闲时 display:none 完全不参与合成。 */
 .burst-layer {
   position: fixed;
   inset: 0;
   z-index: 4;
+  display: none;
   pointer-events: none;
-}
-
-.burst-dot {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  margin: -2px 0 0 -2px;
-  border-radius: 50%;
-  background: radial-gradient(circle,
-    rgba(255, 252, 246, 1) 0%,
-    rgba(237, 232, 224, 0.9) 30%,
-    rgba(201, 169, 97, 0.85) 52%,
-    rgba(201, 169, 97, 0) 78%);
-  box-shadow: 0 0 9px rgba(201, 169, 97, 0.75), 0 0 18px rgba(201, 169, 97, 0.35);
 }
 
 /* ============================================================

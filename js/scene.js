@@ -49,8 +49,19 @@ export const CONFIG = {
   fanTopRatio: 0.075,      // 扇形最上沿距页面顶部（占视口高度，另有像素下限）
   fanBandRatio: 0.32,      // 扇形所在竖直带的基准高度（占视口高度）
   fanStagger: 0.30,        // 偏离中心每一档的错开时长
-  fanFloat: 0.075,         // 展开后各自的浮动幅度
+  fanFloat: 0.022,         // 展开后各自的浮动幅度（克制：约 7px）
+  fanFloatDur: [6.0, 8.5], // 展开后的浮动周期范围（秒，越大越慢）
   fanLean: -0.10,          // 扇形整体向后仰一点，增加立体感
+
+  /* 单张牌背的原地轻摆（不移动位置，只是很慢的左右 + 上下微动） */
+  deckFloatX: 0.012,       // 左右摆幅（世界单位，约 4px）
+  deckFloatY: 0.018,       // 上下摆幅（约 6px）
+  deckFloatDurX: 8.4,      // 左右往返单程时长（秒）
+  deckFloatDurY: 10.2,     // 上下往返单程时长（秒）——与 X 不同，避免看出规律
+
+  /* 指针跟随：单张牌背微微朝向鼠标 / 手指，克制且柔和 */
+  deckTiltMax: 0.105,      // 最大倾角（弧度，约 6°，需求上限 5–8°）
+  deckTiltEase: 0.05,      // 每帧插值系数（60fps 下约 0.3s 到位，无弹簧感）
 };
 
 /* 降级档位建议值（供以后启用 autoDegrade 时使用，当前不自动应用） */
@@ -388,6 +399,7 @@ export function createTarotScene(container) {
     openingShowDeck: () => Promise.resolve(),
     openingFan: () => null,
     openingDeckRect: () => null,
+    openingTilt: () => ({ x: 0, y: 0, degX: 0, degY: 0, targetX: 0, targetY: 0 }),
     resize: () => {},
     dispose: () => {},
   };
@@ -707,7 +719,12 @@ export function createTarotScene(container) {
   }
 
   function openingStopFloat() {
-    openingCards.forEach((c) => { if (c.floatTween) { c.floatTween.kill(); c.floatTween = null; } });
+    openingCards.forEach((c) => {
+      if (!c.floatTween) return;
+      const ts = Array.isArray(c.floatTween) ? c.floatTween : [c.floatTween];
+      ts.forEach((tw) => tw.kill());
+      c.floatTween = null;
+    });
   }
 
   /* 展开后各自缓慢起伏，相位与周期都错开 */
@@ -715,12 +732,13 @@ export function createTarotScene(container) {
     const gsap = window.gsap;
     if (!gsap) return;
     openingStopFloat();
+    const [d0, d1] = CONFIG.fanFloatDur;
     openingCards.forEach((c, i) => {
       const s = fanSlots[i];
       if (!s) return;
       c.floatTween = gsap.to(c.root.position, {
         y: s.y + CONFIG.fanFloat,
-        duration: 3.0 + (i % 5) * 0.42,
+        duration: d0 + (i % 5) * ((d1 - d0) / 4),
         yoyo: true, repeat: -1, ease: 'sine.inOut',
         delay: i * 0.17,
       });
@@ -743,6 +761,77 @@ export function createTarotScene(container) {
       openingCards.push(card);
     }
   }
+
+  /* 单张牌背的原地轻摆：左右与上下用不同周期，都很慢、幅度都很小（约 4px / 6px）。
+   * 用 fromTo 以牌位为中心 ± 幅度，因此是"原地微动"而不是单向漂移。
+   * 视口变化时重算一次，否则牌的落点会停留在旧基准上。 */
+  function openingFloatDeck() {
+    const gsap = window.gsap;
+    const c = openingCards[0];
+    if (!gsap || !c) return;
+    openingStopFloat();
+    c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
+    c.floatTween = [
+      gsap.fromTo(c.root.position,
+        { x: deckSlot.x - CONFIG.deckFloatX },
+        { x: deckSlot.x + CONFIG.deckFloatX, duration: CONFIG.deckFloatDurX,
+          yoyo: true, repeat: -1, ease: 'sine.inOut' }),
+      gsap.fromTo(c.root.position,
+        { y: deckSlot.y - CONFIG.deckFloatY },
+        { y: deckSlot.y + CONFIG.deckFloatY, duration: CONFIG.deckFloatDurY,
+          yoyo: true, repeat: -1, ease: 'sine.inOut' }),
+    ];
+  }
+
+  /* ============================================================
+   * 指针跟随：单张牌背微微朝向鼠标 / 手指
+   * 只有初始态（DECK）才跟随 —— 展开成扇形后牌各有姿态，不参与。
+   * 桌面：鼠标移动即跟随；移动端：按住拖动才跟随；松手 / 移出窗口回到原位。
+   * ============================================================ */
+  const tiltNow = { x: 0, y: 0 };
+  const tiltTo = { x: 0, y: 0 };
+  let tiltDragging = false;
+  let tiltLastMs = 0;
+
+  function tiltFromPointer(clientX, clientY) {
+    const { w, h } = size();
+    const nx = Math.max(-1, Math.min(1, (clientX - w / 2) / (w / 2)));
+    const ny = Math.max(-1, Math.min(1, (clientY - h / 2) / (h / 2)));
+    // 鼠标在右 → 绕 Y 正向转（牌面朝右）；在上 → 绕 X 负向转（牌面朝上）
+    tiltTo.x = ny * CONFIG.deckTiltMax;
+    tiltTo.y = nx * CONFIG.deckTiltMax;
+  }
+
+  function tiltReset() {
+    tiltTo.x = 0;
+    tiltTo.y = 0;
+    tiltDragging = false;
+  }
+
+  function onTiltDown(e) {
+    if (openingState !== OPENING.DECK) return;
+    tiltDragging = true;
+    tiltFromPointer(e.clientX, e.clientY);
+  }
+
+  function onTiltMove(e) {
+    if (openingState !== OPENING.DECK) return;
+    // 手指：必须按住拖动；鼠标：直接跟随
+    if (e.pointerType === 'touch' && !tiltDragging) return;
+    tiltFromPointer(e.clientX, e.clientY);
+  }
+
+  window.addEventListener('pointerdown', onTiltDown, { passive: true });
+  window.addEventListener('pointermove', onTiltMove, { passive: true });
+  window.addEventListener('pointerup', tiltReset, { passive: true });
+  window.addEventListener('pointercancel', tiltReset, { passive: true });
+  window.addEventListener('blur', tiltReset);
+
+  /* 倾角诊断（验证与调参用） */
+  api.openingTilt = () => ({
+    x: tiltNow.x, y: tiltNow.y, degX: tiltNow.x * 180 / Math.PI, degY: tiltNow.y * 180 / Math.PI,
+    targetX: tiltTo.x, targetY: tiltTo.y,
+  });
 
   /* 初始态：屏幕中央一张牌背 */
   api.openingShowDeck = async function () {
@@ -769,10 +858,7 @@ export function createTarotScene(container) {
         v: 1, duration: 1.1, ease: 'power2.out',
         onUpdate: function () { openingCards[0].setOpacity(this.targets()[0].v); },
       });
-      // 单张牌也轻微呼吸
-      openingCards[0].floatTween = gsap.to(openingCards[0].root.position, {
-        y: deckSlot.y + 0.055, duration: 3.6, yoyo: true, repeat: -1, ease: 'sine.inOut',
-      });
+      openingFloatDeck();
     } else {
       openingCards[0].setOpacity(1);
     }
@@ -785,6 +871,7 @@ export function createTarotScene(container) {
 
     const gsap = window.gsap;
     openingStopFloat();
+    tiltReset();                 // 展开后不再跟随指针
     openingLayout();
 
     // 先把牌叠回牌堆位置（像一叠牌）
@@ -827,10 +914,12 @@ export function createTarotScene(container) {
     return tl;
   };
 
-  /* 牌背在屏幕上的矩形，用于放置透明点击区（canvas 是 pointer-events:none） */
+  /* 牌背在屏幕上的矩形，用于放置透明点击区（canvas 是 pointer-events:none）。
+   * 用牌的实际位置（含漂浮偏移）而不是静态牌位，点击区才始终贴着牌。 */
   api.openingDeckRect = function () {
     if (openingState !== OPENING.DECK || !openingCards.length) return null;
-    const p = project(deckSlot);
+    const root = openingCards[0].root;
+    const p = project(root.position);
     const wpx = worldToPixels(deckScale * CARD_W, 0);
     const hpx = worldToPixels(CARD_H * deckScale, 0);
     return { x: p.x - wpx / 2, y: p.y - hpx / 2, w: wpx, h: hpx };
@@ -867,6 +956,18 @@ export function createTarotScene(container) {
     camera.lookAt(0, camState.lookY, 0);
 
     stageGroup.position.y = Math.sin(t * 0.5) * 0.03;
+
+    /* 指针跟随：单张牌背柔和地转向指针方向（插值与帧率无关，无弹簧回弹） */
+    if (openingState === OPENING.DECK && openingCards.length) {
+      const nowMs = performance.now();
+      const dt = tiltLastMs ? Math.min(0.05, (nowMs - tiltLastMs) / 1000) : 1 / 60;
+      tiltLastMs = nowMs;
+      const a = 1 - Math.pow(1 - CONFIG.deckTiltEase, dt * 60);
+      tiltNow.x += (tiltTo.x - tiltNow.x) * a;
+      tiltNow.y += (tiltTo.y - tiltNow.y) * a;
+      openingCards[0].root.rotation.x = tiltNow.x;
+      openingCards[0].root.rotation.y = tiltNow.y;
+    }
 
     /* 输入框雾气：跟随 DOM 位置，淡入淡出由可见度驱动 */
     if (mist) {
@@ -1023,13 +1124,19 @@ export function createTarotScene(container) {
     } else if (openingState === OPENING.DECK && openingCards[0]) {
       openingCards[0].root.scale.setScalar(deckScale);
       openingCards[0].root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
-      if (openingCards[0].root.visible) openingStartFloat();
+      // 单张牌用「原地轻摆」，不能用扇形那套（否则会漂到扇形的槽位上）
+      if (openingCards[0].root.visible) openingFloatDeck();
     }
   };
 
   api.dispose = function () {
     disposed = true;
     if (raf) cancelAnimationFrame(raf);
+    window.removeEventListener('pointerdown', onTiltDown);
+    window.removeEventListener('pointermove', onTiltMove);
+    window.removeEventListener('pointerup', tiltReset);
+    window.removeEventListener('pointercancel', tiltReset);
+    window.removeEventListener('blur', tiltReset);
     openingStopFloat();
     openingCards.forEach((c) => c.dispose());
     openingCards = [];
