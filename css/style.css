@@ -49,6 +49,8 @@
   --y-ai-text: 40%;       /* 解读文字顶部 */
   --y-return: 17%;        /* 解读文字底部预留（返回光球在上面） */
   --ai-ring-size: 72px;
+  --y-wheel-label: 4.6%;  /* 滚筒居中标签（牌上方固定位置） */
+  --y-zoom-label: 4.2%;   /* 放大态的金色身份标签 */
 
   /* 节奏 */
   --gap-section: 104px;
@@ -544,6 +546,28 @@ body.no-3d .card-hit img { visibility: visible; }
 }
 
 .star-hint.is-on { opacity: 1; }
+
+/* ---------- 滚筒居中标签：居中牌的身份（过去 / 现在 / 未来） ---------- */
+.wheel-label {
+  position: fixed;
+  top: var(--y-wheel-label);
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  z-index: 3;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--gold);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+}
+
+.wheel-label.is-on { opacity: 0.92; }
 
 .star-hint i {
   position: absolute;

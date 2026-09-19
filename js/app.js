@@ -1161,6 +1161,23 @@ function updateHits() {
   }
 }
 
+/* 居中标签：某张牌转到中央（对齐度足够高）时淡入并显示身份 */
+let wheelLabelIndex = -1;
+
+function tickWheelUi() {
+  if (!el.wheelLabel) return;
+  if (state !== S.ROW || !lastReading) {
+    el.wheelLabel.classList.remove('is-on');
+    return;
+  }
+  const i = wheelFocusedIndex();
+  if (i !== wheelLabelIndex) {
+    wheelLabelIndex = i;
+    el.wheelLabel.textContent = POSITIONS[i];
+  }
+  el.wheelLabel.classList.toggle('is-on', wheelFocusCos(i) > 0.9);
+}
+
 function tickOverlay() {
   requestAnimationFrame(tickOverlay);
   if (!el.deckHit) return;
@@ -1169,6 +1186,7 @@ function tickOverlay() {
     if (state === S.ROW || state === S.ZOOM) scene.wheelApply(wheel.a);
     setRect(el.deckHit, deckShown ? scene.openingDeckRect() : null);
     updateHits();
+    tickWheelUi();
   } else {
     // 无 3D：牌背用图片顶替
     setRect(el.deckHit, deckShown
@@ -1176,6 +1194,7 @@ function tickOverlay() {
       : null);
     const r0 = el.hits[0];
     if (r0 && (state === S.ROW || state === S.ZOOM)) layoutFallbackWheel();
+    tickWheelUi();
   }
 }
 
@@ -1208,6 +1227,7 @@ function cacheDom() {
   el.readText = document.getElementById('readText');
 
   el.starHint = document.getElementById('starHint');
+  el.wheelLabel = document.getElementById('wheelLabel');
   el.readingView = document.getElementById('readingView');
   el.aiRing = document.getElementById('aiRing');
   el.aiText = document.getElementById('aiText');
