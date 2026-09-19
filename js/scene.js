@@ -59,9 +59,11 @@ export const CONFIG = {
   deckFloatDurX: 8.4,      // 左右往返单程时长（秒）
   deckFloatDurY: 10.2,     // 上下往返单程时长（秒）——与 X 不同，避免看出规律
 
-  /* 指针跟随：单张牌背微微朝向鼠标 / 手指，克制且柔和 */
-  deckTiltMax: 0.105,      // 最大倾角（弧度，约 6°，需求上限 5–8°）
+  /* 指针跟随：单张牌背转向并移向鼠标 / 手指（要看得出来，但仍克制） */
+  deckTiltMax: 0.14,       // 最大倾角（弧度，约 8°，需求上限 5–8°）
   deckTiltEase: 0.05,      // 每帧插值系数（60fps 下约 0.3s 到位，无弹簧感）
+  deckShift: 22,           // 跟随位移上限（屏幕像素，横向）——"跟手"主要靠这段
+  deckShiftYRatio: 0.62,   // 纵向位移相对横向的比例（纵向收敛些，避免顶到标题）
 };
 
 /* 降级档位建议值（供以后启用 autoDegrade 时使用，当前不自动应用） */
@@ -399,7 +401,7 @@ export function createTarotScene(container) {
     openingShowDeck: () => Promise.resolve(),
     openingFan: () => null,
     openingDeckRect: () => null,
-    openingTilt: () => ({ x: 0, y: 0, degX: 0, degY: 0, targetX: 0, targetY: 0 }),
+    openingTilt: () => ({ x: 0, y: 0, degX: 0, degY: 0, targetX: 0, targetY: 0, shiftX: 0, shiftY: 0 }),
     resize: () => {},
     dispose: () => {},
   };
@@ -762,34 +764,29 @@ export function createTarotScene(container) {
     }
   }
 
-  /* 单张牌背的原地轻摆：左右与上下用不同周期，都很慢、幅度都很小（约 4px / 6px）。
-   * 用 fromTo 以牌位为中心 ± 幅度，因此是"原地微动"而不是单向漂移。
-   * 视口变化时重算一次，否则牌的落点会停留在旧基准上。 */
+  /* 单张牌背的「原地轻摆 + 指针跟随」全部在渲染循环里逐帧计算
+   * （时间驱动轻摆 + 指针驱动倾斜/位移，两者相加后一次性写 position，
+   *  避免 GSAP 补间和跟随逻辑抢同一个属性）。
+   * 这里只负责复位基准与跟随量，在显示初始态与视口变化时调用。 */
   function openingFloatDeck() {
-    const gsap = window.gsap;
     const c = openingCards[0];
-    if (!gsap || !c) return;
-    openingStopFloat();
+    if (!c) return;
+    shiftNow.x = 0;
+    shiftNow.y = 0;
+    shiftTo.x = 0;
+    shiftTo.y = 0;
     c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
-    c.floatTween = [
-      gsap.fromTo(c.root.position,
-        { x: deckSlot.x - CONFIG.deckFloatX },
-        { x: deckSlot.x + CONFIG.deckFloatX, duration: CONFIG.deckFloatDurX,
-          yoyo: true, repeat: -1, ease: 'sine.inOut' }),
-      gsap.fromTo(c.root.position,
-        { y: deckSlot.y - CONFIG.deckFloatY },
-        { y: deckSlot.y + CONFIG.deckFloatY, duration: CONFIG.deckFloatDurY,
-          yoyo: true, repeat: -1, ease: 'sine.inOut' }),
-    ];
   }
 
   /* ============================================================
-   * 指针跟随：单张牌背微微朝向鼠标 / 手指
+   * 指针跟随：单张牌背微微转向 / 微微移向鼠标或手指（跟随感要看得出来）
    * 只有初始态（DECK）才跟随 —— 展开成扇形后牌各有姿态，不参与。
    * 桌面：鼠标移动即跟随；移动端：按住拖动才跟随；松手 / 移出窗口回到原位。
    * ============================================================ */
-  const tiltNow = { x: 0, y: 0 };
-  const tiltTo = { x: 0, y: 0 };
+  const tiltNow = { x: 0, y: 0 };     // 当前倾角（弧度）
+  const tiltTo = { x: 0, y: 0 };      // 目标倾角
+  const shiftNow = { x: 0, y: 0 };    // 当前跟随位移（世界单位）
+  const shiftTo = { x: 0, y: 0 };     // 目标跟随位移
   let tiltDragging = false;
   let tiltLastMs = 0;
 
@@ -800,11 +797,19 @@ export function createTarotScene(container) {
     // 鼠标在右 → 绕 Y 正向转（牌面朝右）；在上 → 绕 X 负向转（牌面朝上）
     tiltTo.x = ny * CONFIG.deckTiltMax;
     tiltTo.y = nx * CONFIG.deckTiltMax;
+    // 同时朝指针方向轻微平移（"跟手"主要靠这一段，比纯旋转明显得多）
+    // 注意：屏幕 +y 向下、世界 +y 向上，所以纵向要取反号
+    const sx = pixelsToWorld(CONFIG.deckShift, 0);
+    const sy = pixelsToWorld(CONFIG.deckShift * CONFIG.deckShiftYRatio, 0);
+    shiftTo.x = nx * sx;
+    shiftTo.y = -ny * sy;
   }
 
   function tiltReset() {
     tiltTo.x = 0;
     tiltTo.y = 0;
+    shiftTo.x = 0;
+    shiftTo.y = 0;
     tiltDragging = false;
   }
 
@@ -827,10 +832,13 @@ export function createTarotScene(container) {
   window.addEventListener('pointercancel', tiltReset, { passive: true });
   window.addEventListener('blur', tiltReset);
 
-  /* 倾角诊断（验证与调参用） */
+  /* 倾角 / 位移诊断（验证与调参用） */
   api.openingTilt = () => ({
     x: tiltNow.x, y: tiltNow.y, degX: tiltNow.x * 180 / Math.PI, degY: tiltNow.y * 180 / Math.PI,
     targetX: tiltTo.x, targetY: tiltTo.y,
+    /* 位移按屏幕方向给（正值 = 向右 / 向下），便于验证与读数 */
+    shiftX: worldToPixels(shiftNow.x, 0),
+    shiftY: -worldToPixels(shiftNow.y, 0),
   });
 
   /* 初始态：屏幕中央一张牌背 */
@@ -957,7 +965,7 @@ export function createTarotScene(container) {
 
     stageGroup.position.y = Math.sin(t * 0.5) * 0.03;
 
-    /* 指针跟随：单张牌背柔和地转向指针方向（插值与帧率无关，无弹簧回弹） */
+    /* 单张牌背：原地轻摆（时间驱动）+ 指针跟随（倾斜 + 位移，柔和插值、无弹簧回弹） */
     if (openingState === OPENING.DECK && openingCards.length) {
       const nowMs = performance.now();
       const dt = tiltLastMs ? Math.min(0.05, (nowMs - tiltLastMs) / 1000) : 1 / 60;
@@ -965,8 +973,21 @@ export function createTarotScene(container) {
       const a = 1 - Math.pow(1 - CONFIG.deckTiltEase, dt * 60);
       tiltNow.x += (tiltTo.x - tiltNow.x) * a;
       tiltNow.y += (tiltTo.y - tiltNow.y) * a;
-      openingCards[0].root.rotation.x = tiltNow.x;
-      openingCards[0].root.rotation.y = tiltNow.y;
+      shiftNow.x += (shiftTo.x - shiftNow.x) * a;
+      shiftNow.y += (shiftTo.y - shiftNow.y) * a;
+
+      // 轻摆：周期取「往返单程时长 × 2」，即一轮的总时长
+      const fx = Math.sin(t * (Math.PI * 2) / (CONFIG.deckFloatDurX * 2)) * CONFIG.deckFloatX;
+      const fy = Math.sin(t * (Math.PI * 2) / (CONFIG.deckFloatDurY * 2)) * CONFIG.deckFloatY;
+
+      const c0 = openingCards[0];
+      c0.root.position.set(
+        deckSlot.x + fx + shiftNow.x,
+        deckSlot.y + fy + shiftNow.y,
+        deckSlot.z
+      );
+      c0.root.rotation.x = tiltNow.x;
+      c0.root.rotation.y = tiltNow.y;
     }
 
     /* 输入框雾气：跟随 DOM 位置，淡入淡出由可见度驱动 */
