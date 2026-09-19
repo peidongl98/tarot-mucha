@@ -80,6 +80,29 @@ npx serve .
 - 牌背 `cards/back.jpg` 由原 `pictrues/牌背.png`（4.0MB）转换为 JPEG 并压缩至 ~466KB
 - 所有牌面尺寸统一 1080×1920（9:16）
 
+## 部署
+
+线上地址：<https://tarot-mucha.pages.dev>
+
+- 托管：Cloudflare Pages，项目名 `tarot-mucha`，生产方式为 **Direct Upload**
+- 代码仓库：<https://github.com/peidongl98/tarot-mucha>（`main` 分支）
+
+### 重新部署
+
+仓库里 `pictrues/` 已被 `.gitignore` 排除，用 `git archive` 导出已跟踪文件后再上传，可保证只发布站点本身：
+
+```bash
+# 导出已跟踪文件到临时目录
+mkdir -p ../dist && git archive --format=tar HEAD | tar -x -C ../dist
+
+# 上传（需要 CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID 环境变量）
+npx wrangler pages deploy ../dist --project-name=tarot-mucha --branch=main
+```
+
+> 注意：当前 Cloudflare 账号未安装 Cloudflare Pages 的 GitHub App，因此**无法用 API 建立 Git 自动部署**。如需「推送即自动部署」，有两种方式：
+> 1. 在 Cloudflare 后台手动安装一次 GitHub App 并把项目改为 Git 集成；
+> 2. 在仓库加一个 GitHub Actions 工作流，用 `cloudflare/wrangler-action` 在 push 时执行上面的部署命令（需要把 token 存为仓库 Secret）。
+
 ## 版权与声明
 
 牌义采用公版 Rider-Waite-Smith 体系的中文表述，仅供娱乐与自我反思，不构成任何专业建议。
