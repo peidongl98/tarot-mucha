@@ -40,7 +40,7 @@ const SWIPE_MAX_MS = 700;      // 手势最长时间
 
 /* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互） */
 const WHEEL_STEP = (Math.PI * 2) / 3;   // 相邻两牌的角距（120°）
-const WHEEL_DRAG_RATE = 3.4;            // 拖动灵敏度（每视口宽的弧度）
+const WHEEL_DRAG_RATE = 4.4;            // 拖动灵敏度：约半屏宽度转一格（120°）
 const WHEEL_FLING_GAIN = 0.16;          // 惯性外推时间（秒）
 const wheel = { a: 0, dragging: false, tween: null, suppressedAt: 0 };
 
@@ -721,6 +721,10 @@ function zoomIn(i) {
   zoomIndex = i;
   showStarHint(false);
   if (scene && scene.ok) scene.zoomCard(i, true);
+  if (el.zoomLabel) {
+    el.zoomLabel.textContent = POSITIONS[i];   // 牌上方金色身份文字
+    el.zoomLabel.classList.add('is-on');
+  }
   showMeaning(i);
 }
 
@@ -728,6 +732,7 @@ function zoomOut() {
   const i = zoomIndex;
   if (i < 0) return;
   state = S.ROW;
+  if (el.zoomLabel) el.zoomLabel.classList.remove('is-on');
   hideMeaning();
   if (scene && scene.ok) scene.zoomCard(i, false);
   zoomIndex = -1;
@@ -738,7 +743,6 @@ function showMeaning(i) {
   const meta = TAROT_BY_ID[lastReading[i].id];
   const mean = TAROT_MEANINGS[lastReading[i].id];
   const rev = !!lastReading[i].reversed;
-  el.readPos.textContent = POSITIONS[i];
   el.readName.textContent = meta.name;
   el.readBadge.textContent = rev ? '逆位' : '正位';
   el.readKeys.textContent = (mean ? (rev ? mean.revKeys : mean.upKeys) : []).join(' · ');
@@ -1281,7 +1285,7 @@ function cacheDom() {
   el.drawHint = document.getElementById('drawHint');
 
   el.cardRead = document.getElementById('cardRead');
-  el.readPos = document.getElementById('readPos');
+  el.zoomLabel = document.getElementById('zoomLabel');
   el.readName = document.getElementById('readName');
   el.readBadge = document.getElementById('readBadge');
   el.readKeys = document.getElementById('readKeys');

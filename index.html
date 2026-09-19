@@ -58,9 +58,11 @@
 <button id="hit1" class="card-hit" type="button" aria-label="第二张牌" hidden></button>
 <button id="hit2" class="card-hit" type="button" aria-label="第三张牌" hidden></button>
 
+<!-- 放大态：牌上方的金色身份文字（过去 / 现在 / 未来） -->
+<p class="zoom-label" id="zoomLabel" aria-hidden="true"></p>
+
 <!-- 牌义：放大某张牌时浮出（只有文字，没有框线） -->
 <section class="card-read" id="cardRead" aria-live="polite">
-  <p class="read-pos" id="readPos"></p>
   <h2 class="read-name" id="readName"></h2>
   <p class="read-badge" id="readBadge"></p>
   <p class="read-keys" id="readKeys"></p>

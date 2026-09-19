@@ -497,12 +497,26 @@ body.no-3d .card-hit img { visibility: visible; }
   transition: opacity 0.85s ease, transform 0.85s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.read-pos {
-  margin: 0 0 8px;
-  font-size: 11px;
-  letter-spacing: 0.34em;
-  color: var(--faint);
+/* 放大态的金色身份文字（牌上方固定位置） */
+.zoom-label {
+  position: fixed;
+  top: var(--y-zoom-label);
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  z-index: 4;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: var(--gold);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease 0.15s;
 }
+
+.zoom-label.is-on { opacity: 0.95; }
 
 .read-name {
   margin: 0;
