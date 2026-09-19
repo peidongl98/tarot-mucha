@@ -1,0 +1,370 @@
+/* css/style.css — 穆夏塔罗（批次 A：纯静态，无动效）
+ * 深色底 + 金铜色点缀，呼应穆夏新艺术风格画面。
+ * 仅使用系统字体，不引用任何外部资源。
+ */
+
+:root {
+  --bg: #14101a;
+  --bg-soft: #1b1526;
+  --panel: #221b2e;
+  --panel-2: #2a2138;
+  --line: #3a2f4d;
+  --gold: #d8b45a;
+  --gold-dim: #9a8143;
+  --text: #ece7f2;
+  --text-dim: #a89fbb;
+  --text-mute: #7d7492;
+  --radius: 14px;
+
+  --serif: Georgia, "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+          "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 0 0 40px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 页头 ---------- */
+
+.site-header {
+  padding: 34px 18px 18px;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(216, 180, 90, 0.13), transparent 62%),
+    var(--bg-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.site-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: 0.32em;
+  text-indent: 0.32em;
+  color: var(--gold);
+}
+
+.site-sub {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.site-positions {
+  margin: 6px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--text-mute);
+}
+
+.site-positions i { margin: 0 8px; font-style: normal; }
+
+/* ---------- 布局 ---------- */
+
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 14px;
+}
+
+/* ---------- 抽牌按钮 ---------- */
+
+.draw-panel {
+  padding: 30px 0 8px;
+  text-align: center;
+}
+
+.draw-btn {
+  display: inline-block;
+  min-width: 200px;
+  min-height: 52px;
+  padding: 13px 40px;
+  font-family: var(--sans);
+  font-size: 17px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #1a1408;
+  background: linear-gradient(180deg, #e6c877, var(--gold));
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.draw-btn:active { filter: brightness(0.92); }
+
+.draw-btn[disabled] {
+  opacity: 0.5;
+  cursor: default;
+  filter: none;
+}
+
+.draw-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-mute);
+}
+
+/* ---------- 结果区 ---------- */
+
+.result {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 22px;
+  align-items: start;
+}
+
+.placeholder {
+  grid-column: 1 / -1;
+  padding: 52px 20px;
+  text-align: center;
+  color: var(--text-mute);
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+.placeholder p { margin: 0; }
+.placeholder-sub { margin-top: 6px !important; font-size: 12px; }
+
+/* ---------- 单张牌 ---------- */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  overflow: hidden;
+}
+
+.card-pos {
+  margin: 0 0 10px;
+  text-align: center;
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: var(--gold);
+}
+
+.card-imgwrap {
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+}
+
+.card-imgwrap img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  height: auto;
+  object-fit: cover;
+}
+
+.card-imgwrap img.is-reversed { transform: rotate(180deg); }
+
+.card-head {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.card-name {
+  font-family: var(--serif);
+  font-size: 19px;
+  color: var(--text);
+}
+
+.card-en {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-mute);
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  vertical-align: 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  border-radius: 999px;
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+}
+
+.badge.badge-rev {
+  border-color: #6b5a86;
+  color: #b6a6d4;
+}
+
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keys li {
+  padding: 2px 9px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.meaning {
+  margin: 11px 0 0;
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--text);
+}
+
+.meaning-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--text-mute);
+}
+
+/* ---------- 历史 ---------- */
+
+.history-panel {
+  margin-top: 40px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  color: var(--gold);
+}
+
+.clear-btn {
+  min-height: 34px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.clear-btn:active { background: var(--panel-2); }
+
+.history-list { margin-top: 8px; }
+
+.history-empty {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-mute);
+}
+
+.history-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 11px 4px;
+  text-align: left;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.history-item:active { background: var(--panel-2); }
+
+.history-time {
+  display: block;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+.history-cards {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.6;
+}
+
+.history-cards em {
+  font-style: normal;
+  color: var(--text-mute);
+}
+
+.history-note {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+/* ---------- 页脚 ---------- */
+
+.site-footer {
+  max-width: 1080px;
+  margin: 30px auto 0;
+  padding: 0 18px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-mute);
+}
+
+.site-footer p { margin: 4px 0; }
+.footer-dim { color: #635a76; }
+
+/* ---------- 移动端 ---------- */
+
+@media (max-width: 760px) {
+  .site-header { padding: 26px 16px 14px; }
+  .site-title { font-size: 24px; }
+  .result { grid-template-columns: 1fr; gap: 14px; }
+  .card { display: grid; grid-template-columns: 108px 1fr; gap: 12px; padding: 12px; }
+  .card-pos { grid-column: 1 / -1; margin-bottom: 0; }
+  .card-imgwrap { grid-row: 2 / span 3; }
+  .card-head { margin-top: 0; text-align: left; }
+  .keys { margin-top: 8px; }
+  .meaning { margin-top: 8px; font-size: 13px; }
+  .draw-btn { width: 100%; min-width: 0; }
+}
+
+@media (max-width: 380px) {
+  .card { grid-template-columns: 92px 1fr; }
+  .card-name { font-size: 17px; }
+}

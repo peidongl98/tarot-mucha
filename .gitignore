@@ -1,0 +1,27 @@
+# 依赖 / 构建产物（本项目本就零依赖，此条为兜底）
+node_modules/
+dist/
+build/
+.cache/
+
+# 凭证：绝不入库
+.deploy-secrets
+.deploy-secrets.*
+.env
+.env.*
+*.pem
+*.key
+
+# 原始素材目录：cards/ 已包含全部牌面，此处仅作本地备份，不入库（约 30MB）
+pictrues/
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.log
+
+# 原始素材压缩包
+*.zip
