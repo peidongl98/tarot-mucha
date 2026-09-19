@@ -3,55 +3,139 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#14101a">
-<meta name="description" content="穆夏塔罗 · 在线抽三张牌（过去 / 现在 / 未来），内置 78 张公版牌义。纯娱乐。">
+<meta name="theme-color" content="#0A0908">
+<meta name="description" content="穆夏塔罗 · 抽三张牌，看见过去、现在与未来。内置 78 张公版牌义，可选用 AI 深度解读。纯娱乐。">
 <title>穆夏塔罗 · 过去 现在 未来</title>
 <link rel="icon" href="cards/favicon.png">
+
+<!-- 字体：标题 Cormorant Garamond；正文走系统栈 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&display=swap">
+
 <link rel="stylesheet" href="css/style.css">
+
+<!-- GSAP（UMD 全局） -->
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+
+<!-- Three.js：importmap，零构建 -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js"
+  }
+}
+</script>
 </head>
 <body>
 
-<header class="site-header">
-  <h1 class="site-title">穆夏塔罗</h1>
-  <p class="site-sub">静心默念你的问题，然后抽三张牌</p>
-  <p class="site-positions"><span>过去</span><i>·</i><span>现在</span><i>·</i><span>未来</span></p>
+<!-- Layer 0：WebGL 画布容器（fixed 铺满，三层 3D 都渲染在这一个 canvas 里） -->
+<div id="gl" class="gl-layer" aria-hidden="true"></div>
+
+<!-- WebGL 不可用时的友好提示 -->
+<div id="glNotice" class="gl-notice" hidden>
+  <p class="gl-notice-title">你的浏览器暂不支持 3D 渲染</p>
+  <p class="gl-notice-text">页面已切换为简洁模式，抽牌与牌义功能完全正常。</p>
+</div>
+
+<noscript>
+  <div class="gl-notice">
+    <p class="gl-notice-title">需要开启 JavaScript</p>
+    <p class="gl-notice-text">抽牌功能依赖 JavaScript，请在浏览器设置中开启后刷新。</p>
+  </div>
+</noscript>
+
+<!-- 牌位标签浮层：固定在视口上，按 3D 投影对齐三张牌 -->
+<div id="stageOverlay" class="stage-overlay" aria-hidden="true">
+  <div class="slot-label" data-slot="0">
+    <span class="slot-pos">过去</span>
+    <span class="slot-name"></span>
+    <span class="slot-badge"></span>
+  </div>
+  <div class="slot-label" data-slot="1">
+    <span class="slot-pos">现在</span>
+    <span class="slot-name"></span>
+    <span class="slot-badge"></span>
+  </div>
+  <div class="slot-label" data-slot="2">
+    <span class="slot-pos">未来</span>
+    <span class="slot-name"></span>
+    <span class="slot-badge"></span>
+  </div>
+</div>
+
+<!-- ===== 首屏 ===== -->
+<header class="hero" id="hero">
+  <p class="hero-eyebrow anim-hero">Rider–Waite–Smith · 78 Cards</p>
+  <h1 class="hero-title anim-hero">穆夏塔罗</h1>
+  <div class="hero-rule anim-hero"></div>
+  <p class="hero-positions anim-hero">过去<i>·</i>现在<i>·</i>未来</p>
+  <p class="hero-note anim-hero">静下心，把问题放在心里，然后抽三张牌。</p>
+  <div class="hero-actions anim-hero">
+    <button id="drawBtn" class="btn-primary" type="button">开 始 抽 牌</button>
+  </div>
+  <p id="drawHint" class="hero-hint anim-hero">78 张牌 · 正逆位随机</p>
 </header>
 
-<main class="wrap">
+<!-- ===== 3D 舞台（DOM 基本留空，让 3D 卡牌透出） ===== -->
+<section class="stage" id="stage" aria-label="牌阵">
+  <div class="stage-action">
+    <button id="drawBtn2" class="btn-primary btn-compact" type="button">再 抽 一 次</button>
+    <p class="stage-scroll-hint">向下滚动，查看牌义与解读</p>
+  </div>
+</section>
 
-  <section class="draw-panel">
-    <button id="drawBtn" class="draw-btn" type="button">抽 牌</button>
-    <p id="drawHint" class="draw-hint">78 张牌，正逆位随机</p>
-  </section>
-
-  <section id="result" class="result" aria-live="polite">
-    <!-- 结果由 js/app.js 渲染 -->
-    <div class="placeholder" id="placeholder">
-      <p>还没有抽牌</p>
-      <p class="placeholder-sub">点击上方「抽牌」开始</p>
-    </div>
-  </section>
-
-  <section class="history-panel">
-    <div class="history-head">
-      <h2>抽牌记录</h2>
-      <button id="clearBtn" class="clear-btn" type="button">清空</button>
-    </div>
-    <div id="historyList" class="history-list">
-      <p class="history-empty">暂无记录</p>
-    </div>
-    <p class="history-note">记录仅保存在本机浏览器，不会上传。</p>
-  </section>
-
+<!-- ===== 牌义 ===== -->
+<main class="reading" id="reading">
+  <div class="section-head">
+    <h2 class="section-title">牌 义</h2>
+    <div class="section-rule"></div>
+  </div>
+  <div class="reading-grid" id="readingGrid"></div>
 </main>
 
+<!-- ===== AI 解读 ===== -->
+<section class="ai" id="aiSection">
+  <div class="section-head">
+    <h2 class="section-title">AI 解 读</h2>
+    <div class="section-rule"></div>
+    <p class="section-note">写下你的问题，让解读落在具体的事情上。不填也可以，会给出整体解读。</p>
+  </div>
+
+  <div class="ai-card">
+    <label class="ai-label" for="question">你想问什么</label>
+    <textarea id="question" class="ai-input" rows="3" maxlength="200"
+      placeholder="例如：我该不该换一份工作？"></textarea>
+    <div class="ai-meta">
+      <span id="questionCount" class="ai-count">0 / 200</span>
+      <button id="aiBtn" class="btn-secondary" type="button" disabled>AI 解 读</button>
+    </div>
+    <div id="aiOut" class="ai-out" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ===== 历史 ===== -->
+<section class="history" id="history">
+  <div class="section-head">
+    <div class="history-head">
+      <h2 class="section-title">抽 牌 记 录</h2>
+      <button id="clearBtn" class="btn-ghost" type="button">清 空</button>
+    </div>
+    <div class="section-rule"></div>
+  </div>
+  <div id="historyList" class="history-list"></div>
+</section>
+
 <footer class="site-footer">
-  <p>牌义为 Rider-Waite-Smith 体系公版内容，仅供娱乐与自我反思，不构成任何专业建议。</p>
-  <p class="footer-dim">不收集任何个人信息 · 无需登录</p>
+  <div class="footer-rule"></div>
+  <p>牌义取自公版 Rider–Waite–Smith 体系；AI 解读由大模型生成。</p>
+  <p class="footer-dim">本页仅供娱乐参考，不构成任何专业建议。</p>
 </footer>
 
+<!-- 数据层：保持既有的全局变量形式（先于模块执行） -->
 <script src="js/data.js"></script>
 <script src="data/meanings.js"></script>
-<script src="js/app.js"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

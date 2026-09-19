@@ -4,6 +4,9 @@ dist/
 build/
 .cache/
 
+# wrangler 本地开发产物（pages dev 的临时 bundle 与 miniflare 状态）
+.wrangler/
+
 # 凭证：绝不入库
 .deploy-secrets
 .deploy-secrets.*
