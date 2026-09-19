@@ -6,13 +6,16 @@
  *   js/scene.js      -> createTarotScene（ES module）
  *   window.gsap / window.ScrollTrigger（CDN，UMD 全局）
  *
- * 流程：标题 + 提问 + 抽牌按钮 → 抽牌 → 三张牌与牌义 → AI 解读（沿用首屏问题）
+ * 本批次只做「开场」，流程：
+ *   单张牌背（屏幕中央）+ 顶部花体标题
+ *   → 点击牌背：展开成 9 张扇形（屏幕上方 1/3），标题同时炸成星光并消失
+ *   → 扇面下方淡入神秘问句 + 无框输入框 + 泛涟漪光圈
  *
- * 不存储任何用户数据：没有 localStorage、没有历史记录、抽牌与提问都不落盘。
+ * 抽牌 / 看牌 / 上滑解读留给后续批次：
+ *   showReading / onDraw / AI 相关代码全部保留可用，只是当前没有触发入口
+ *   （光圈点击暂时只做轻微脉冲反馈；后续把 onRingClick 接到 onDraw 即可）
  *
- * 双路径：
- *   WebGL 可用   → 3D 卡牌 + 输入框粒子雾；牌义面板只出文字
- *   WebGL 不可用 → body.no-3d，牌义面板补上牌面小图，其余功能照常
+ * 不存储任何用户数据：没有 localStorage、没有历史记录。
  */
 
 import { createTarotScene } from './scene.js';
@@ -21,17 +24,19 @@ const MAX_QUESTION_LEN = 200;
 const POSITIONS = ['过去', '现在', '未来'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-/* 早期版本用 localStorage 存抽牌历史，该功能已移除；顺手清掉遗留键，避免浏览器里残留抽牌数据 */
+/* 早期版本用 localStorage 存抽牌历史，该功能已移除；顺手清掉遗留键 */
 const LEGACY_STORAGE_KEY = 'tarot_history';
 
 const el = {};
 let scene = null;
-let lastReading = null;     // [{ id, reversed }]
+let lastReading = null;      // [{ id, reversed }]
 let aiBusy = false;
 let readingTrigger = null;
+let openingOpened = false;
+let ringActive = false;
 
 /* ============================================================
- * 抽牌
+ * 抽牌（后续批次触发）
  * ============================================================ */
 
 function randInt(max) {
@@ -59,7 +64,7 @@ function drawThree() {
 }
 
 /* ============================================================
- * 渲染
+ * 渲染（后续批次）
  * ============================================================ */
 
 function elNew(tag, cls, text) {
@@ -83,7 +88,6 @@ function renderReading(cards) {
     box.appendChild(elNew('p', 'read-en', `${meta.en} · ${meta.suitCn}`));
     box.appendChild(elNew('span', 'read-badge' + (rev ? ' is-rev' : ''), rev ? '逆位' : '正位'));
 
-    // 只在降级模式（body.no-3d）与窄屏下由 CSS 显示
     const thumb = document.createElement('img');
     thumb.className = 'read-thumb';
     thumb.src = 'cards/' + meta.file;
@@ -102,7 +106,6 @@ function renderReading(cards) {
   });
 }
 
-/* fixed 浮层上的三个牌位标签 */
 function fillSlotLabels(cards) {
   cards.forEach((c, i) => {
     const meta = TAROT_BY_ID[c.id];
@@ -114,15 +117,214 @@ function fillSlotLabels(cards) {
 }
 
 /* ============================================================
- * GSAP 编排
+ * 开场 · 标题炸成星光
+ * 用 canvas 画出同字体的标题、读像素，在真实字形位置上生成光点，
+ * 因此爆散是从笔画里散开，而不是从一个矩形里冒出。
  * ============================================================ */
 
-/* 1) 首屏：标题 → 输入框 → 抽牌按钮，依次淡入上移 */
-function introHero() {
-  if (!window.gsap || REDUCED) return;
-  window.gsap.timeline({ defaults: { ease: 'power3.out' } })
-    .from('.anim-hero', { y: 26, opacity: 0, duration: 1.05, stagger: 0.13 }, 0.2);
+function sampleTitlePoints(node, rect) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = Math.max(1, Math.round(rect.width * dpr));
+  const chh = Math.max(1, Math.round(rect.height * dpr));
+  const cv = document.createElement('canvas');
+  cv.width = cw;
+  cv.height = chh;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return [];
+
+  const cs = getComputedStyle(node);
+  ctx.scale(dpr, dpr);
+  ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff';
+
+  // 逐字绘制并手动累加字距，才能和 DOM 上的 letter-spacing 对齐
+  const text = (node.textContent || '').trim();
+  const ls = parseFloat(cs.letterSpacing) || 0;
+  const chars = Array.from(text);
+  const widths = chars.map((c) => ctx.measureText(c).width + ls);
+  const total = widths.reduce((a, b) => a + b, 0) - ls;
+
+  let x = (rect.width - total) / 2;
+  chars.forEach((c, i) => {
+    ctx.fillText(c, x, rect.height / 2);
+    x += widths[i];
+  });
+
+  let data;
+  try { data = ctx.getImageData(0, 0, cw, chh).data; } catch (e) { return []; }
+
+  const step = Math.max(2, Math.round(2 * dpr));
+  const pts = [];
+  for (let py = 0; py < chh; py += step) {
+    for (let px = 0; px < cw; px += step) {
+      if (data[(py * cw + px) * 4 + 3] > 110) pts.push({ x: px / dpr, y: py / dpr });
+    }
+  }
+  // 打散后限量，控制 DOM 节点数
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = pts[i]; pts[i] = pts[j]; pts[j] = t;
+  }
+  return pts.slice(0, 260);
 }
+
+async function explodeTitle() {
+  const node = el.openingTitle;
+  if (!node || node.dataset.gone === '1') return;
+  node.dataset.gone = '1';
+
+  // 等 webfont 就绪，否则 canvas 量到的字宽是回退字体的
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) { /* 忽略 */ }
+
+  const rect = node.getBoundingClientRect();
+  const points = sampleTitlePoints(node, rect);
+  node.style.visibility = 'hidden';
+
+  const gsap = window.gsap;
+  if (!gsap || !points.length || REDUCED || !el.burstLayer) return;
+
+  const frag = document.createDocumentFragment();
+  const nodes = points.map((p) => {
+    const s = elNew('span', 'burst-dot');
+    s.style.left = (rect.left + p.x) + 'px';
+    s.style.top = (rect.top + p.y) + 'px';
+    frag.appendChild(s);
+    return s;
+  });
+  el.burstLayer.appendChild(frag);
+
+  nodes.forEach((n) => {
+    const a = Math.random() * Math.PI * 2;
+    const d = 58 + Math.random() * 210;
+    gsap.to(n, {
+      x: Math.cos(a) * d,
+      y: Math.sin(a) * d + 34,
+      opacity: 0,
+      scale: 0.35,
+      duration: 1.25 + Math.random() * 1.15,
+      ease: 'power2.out',
+      delay: Math.random() * 0.22,
+      onComplete: () => { if (n.parentNode) n.parentNode.removeChild(n); },
+    });
+  });
+}
+
+/* ============================================================
+ * 开场 · 问句 / 输入框 / 光圈淡入
+ * ============================================================ */
+
+function showAskArea() {
+  const targets = [el.openingQuestion, el.openingField, el.ringBtn, el.openingHint]
+    .filter(Boolean);
+  const gsap = window.gsap;
+
+  if (!gsap || REDUCED) {
+    targets.forEach((n) => { n.style.opacity = '1'; n.style.transform = 'none'; });
+    focusOnDesktop();
+    return;
+  }
+
+  gsap.fromTo(targets,
+    { opacity: 0, y: 16 },
+    {
+      opacity: 1, y: 0, duration: 1.0, stagger: 0.16, ease: 'power3.out', delay: 0.8,
+      onComplete: focusOnDesktop,
+    });
+}
+
+/* 桌面端自动落焦点，用户可以直接开始打字；移动端不自动唤起键盘 */
+function focusOnDesktop() {
+  const fine = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  if (fine && el.question) {
+    try { el.question.focus({ preventScroll: true }); } catch (e) { el.question.focus(); }
+  }
+}
+
+/* ============================================================
+ * 开场 · 点击牌背展开扇形
+ * ============================================================ */
+
+function openFan() {
+  if (openingOpened) return;
+  openingOpened = true;
+  if (el.deckHit) el.deckHit.hidden = true;
+
+  if (scene && scene.ok) scene.openingFan();
+
+  // 标题炸散与扇面展开同时开始：先让星光散进上方暗区，卡牌随后才涌上来
+  if (window.gsap && !REDUCED) window.gsap.delayedCall(0.06, explodeTitle);
+  else explodeTitle();
+
+  showAskArea();
+}
+
+/* ============================================================
+ * 开场 · 光圈状态
+ * 只在「空 ↔ 非空」跳变时切换，避免每次按键都重启动画
+ * ============================================================ */
+
+function syncRing() {
+  if (!el.ringBtn) return;
+  const has = (el.question.value || '').trim().length > 0;
+  if (has === ringActive) return;
+  ringActive = has;
+  el.ringBtn.classList.toggle('is-active', has);
+}
+
+function onRingClick() {
+  if (!el.ringBtn) return;
+  // 本批次不触发抽牌，只给一个轻微脉冲反馈
+  el.ringBtn.classList.remove('is-pulsing');
+  void el.ringBtn.offsetWidth;      // 重启动画
+  el.ringBtn.classList.add('is-pulsing');
+  window.setTimeout(() => el.ringBtn.classList.remove('is-pulsing'), 760);
+}
+
+/* ============================================================
+ * 每帧：把 3D 牌背的投影位置写给透明点击区
+ * ============================================================ */
+
+function tickOverlay() {
+  requestAnimationFrame(tickOverlay);
+  if (!scene || !scene.ok) return;
+
+  const h = window.innerHeight;
+
+  /* 牌背点击区（仅初始态需要；展开后隐藏） */
+  if (el.deckHit) {
+    const r = openingOpened ? null : scene.openingDeckRect();
+    if (r) {
+      el.deckHit.hidden = false;
+      el.deckHit.style.left = r.x + 'px';
+      el.deckHit.style.top = r.y + 'px';
+      el.deckHit.style.width = r.w + 'px';
+      el.deckHit.style.height = r.h + 'px';
+    } else if (!el.deckHit.hidden) {
+      el.deckHit.hidden = true;
+    }
+  }
+
+  /* 牌位标签（后续批次抽牌后使用） */
+  if (!document.body.classList.contains('has-draw')) return;
+  const stageRect = el.stage.getBoundingClientRect();
+  const visible = stageRect.top <= h * 0.28 && stageRect.bottom >= h * 0.72;
+  el.stageOverlay.style.opacity = visible ? '1' : '0';
+  if (!visible) return;
+
+  for (let i = 0; i < 3; i++) {
+    const p = scene.projectSlot(i);
+    const y = scene.cardBottomY(i);
+    const node = el.slotLabels[i];
+    if (!p || y == null || !node) continue;
+    node.style.left = p.x + 'px';
+    node.style.top = y + 'px';
+  }
+}
+
+/* ============================================================
+ * GSAP 编排（后续批次）
+ * ============================================================ */
 
 function revealStageLabels() {
   const labels = el.slotLabels;
@@ -132,8 +334,7 @@ function revealStageLabels() {
     if (action) action.style.opacity = '1';
     return;
   }
-  // 注意：这两个元素在 CSS 里靠 translateX(-50%) 居中，
-  // 用 GSAP 时必须带上 xPercent:-50，否则会覆盖 CSS transform 导致偏移。
+  // 这两个元素靠 CSS translateX(-50%) 居中，用 GSAP 时必须带 xPercent:-50
   window.gsap.fromTo(labels,
     { opacity: 0, yPercent: -22, xPercent: -50 },
     { opacity: 1, yPercent: 0, xPercent: -50, duration: 0.9, stagger: 0.16, ease: 'power3.out' });
@@ -144,7 +345,6 @@ function revealStageLabels() {
   }
 }
 
-/* 结果区进入视口触发逐段淡入 */
 function armReadingReveal() {
   if (readingTrigger) { readingTrigger.kill(); readingTrigger = null; }
   if (!window.gsap || !window.ScrollTrigger) return;
@@ -178,7 +378,6 @@ function armSimpleReveal(selector, trigger) {
   });
 }
 
-/* 相机随滚动向后拉开 */
 function armCameraScroll() {
   if (!scene || !scene.ok || !window.ScrollTrigger) return;
   window.ScrollTrigger.create({
@@ -190,59 +389,7 @@ function armCameraScroll() {
 }
 
 /* ============================================================
- * 每帧：读 DOM → 更新 3D 雾气 → 写牌位标签
- * 先读后写，避免读写交错引起布局抖动；scene 内部不再读 DOM。
- * ============================================================ */
-
-function tickOverlay() {
-  requestAnimationFrame(tickOverlay);
-  if (!scene || !scene.ok) return;
-
-  const h = window.innerHeight;
-
-  /* ---- 读：输入框矩形（用于雾气跟随） ---- */
-  let qRect = null;
-  let qVis = 0;
-  if (el.question) {
-    const q = el.question.getBoundingClientRect();
-    if (q.bottom > 0 && q.top < h) {
-      const fadeIn = Math.min(1, Math.max(0, (h - q.top) / 140));
-      const fadeOut = Math.min(1, Math.max(0, q.bottom / 140));
-      const focused = document.activeElement === el.question;
-      qVis = Math.min(fadeIn, fadeOut) * (focused ? 1 : 0.78);
-    }
-    qRect = q;
-  }
-
-  /* ---- 读：舞台矩形（用于牌位标签显隐） ---- */
-  let stageRect = null;
-  if (document.body.classList.contains('has-draw')) {
-    stageRect = el.stage.getBoundingClientRect();
-  }
-
-  /* ---- 写 ---- */
-  scene.updateMist(qRect, qVis);
-
-  if (!stageRect) {
-    el.stageOverlay.style.opacity = '0';
-    return;
-  }
-  const visible = stageRect.top <= h * 0.28 && stageRect.bottom >= h * 0.72;
-  el.stageOverlay.style.opacity = visible ? '1' : '0';
-  if (!visible) return;
-
-  for (let i = 0; i < 3; i++) {
-    const p = scene.projectSlot(i);
-    const y = scene.cardBottomY(i);
-    const node = el.slotLabels[i];
-    if (!p || y == null || !node) continue;
-    node.style.left = p.x + 'px';
-    node.style.top = y + 'px';
-  }
-}
-
-/* ============================================================
- * 主流程
+ * 抽牌主流程（后续批次）
  * ============================================================ */
 
 function showReading(cards, opts) {
@@ -264,7 +411,6 @@ function showReading(cards, opts) {
     });
   }
 
-  /* 抽牌：从空间深处浮现 → 飞向三位 → 依次 3D 翻转（由 scene 内部 GSAP 编排） */
   if (scene && scene.ok) {
     scene.reveal(
       cards.map((c) => ({ src: 'cards/' + TAROT_BY_ID[c.id].file, reversed: !!c.reversed })),
@@ -276,18 +422,17 @@ function showReading(cards, opts) {
 }
 
 function setDrawBusy(busy) {
-  [el.drawBtn, el.drawBtn2].forEach((b) => { if (b) b.disabled = busy; });
-  if (el.drawBtn) el.drawBtn.textContent = busy ? '正 在 洗 牌' : '再 抽 一 次';
-  if (el.drawBtn2) el.drawBtn2.textContent = '再 抽 一 次';
+  if (!el.drawBtn2) return;
+  el.drawBtn2.disabled = busy;
+  el.drawBtn2.textContent = busy ? '正 在 洗 牌' : '再 抽 一 次';
 }
 
 function onDraw() {
-  if (el.drawBtn.disabled) return;
+  if (el.drawBtn2 && el.drawBtn2.disabled) return;
   setDrawBusy(true);
   const cards = drawThree();
   showReading(cards, { scroll: true });
-  // 首轮要加载贴图，稍晚一点恢复按钮
-  setTimeout(() => setDrawBusy(false), scene && scene.ok ? 900 : 120);
+  window.setTimeout(() => setDrawBusy(false), scene && scene.ok ? 900 : 120);
 }
 
 /* ============================================================
@@ -299,12 +444,10 @@ function updateAiButton() {
   el.aiBtn.disabled = aiBusy || !lastReading;
 }
 
-/* 提问只在首屏采集，这里统一读取 */
 function currentQuestion() {
   return el.question ? (el.question.value || '').trim().slice(0, MAX_QUESTION_LEN) : '';
 }
 
-/* 把将被使用的问题回显到 AI 面板；没填就不显示这一行 */
 function syncQuestionEcho() {
   if (!el.aiQuestion || !el.aiQuestionEcho) return;
   const q = currentQuestion();
@@ -312,7 +455,6 @@ function syncQuestionEcho() {
   el.aiQuestion.hidden = !q;
 }
 
-/* 加载状态：呼吸光晕（CSS），不用转圈 */
 function setAiLoading(on) {
   aiBusy = on;
   el.aiCard.classList.toggle('is-loading', on);
@@ -325,7 +467,6 @@ function showAiError(msg) {
   el.aiOut.appendChild(elNew('div', 'ai-error', msg));
 }
 
-/* 打字机逐字显示 */
 function typeOut(text, done) {
   el.aiOut.textContent = '';
 
@@ -361,7 +502,7 @@ function typeOut(text, done) {
     const full = p.dataset.full;
     ci = Math.min(full.length, ci + 2);
     p.textContent = full.slice(0, ci);
-    p.appendChild(caret);   // appendChild 会移动节点，光标始终停在末尾
+    p.appendChild(caret);
     if (ci >= full.length) { pi++; ci = 0; }
     requestAnimationFrame(step);
   }
@@ -387,7 +528,6 @@ async function askAi() {
         position: POSITIONS[i],
         reversed: rev,
         en: meta.en,
-        // 附上本地牌义，让模型解读与用户眼前看到的牌义一致
         meaning: mean ? (rev ? mean.rev : mean.up) : '',
         keywords: mean ? (rev ? mean.revKeys : mean.upKeys) : [],
       };
@@ -432,34 +572,40 @@ async function askAi() {
 function cacheDom() {
   el.gl = document.getElementById('gl');
   el.glNotice = document.getElementById('glNotice');
+  el.burstLayer = document.getElementById('burstLayer');
+  el.deckHit = document.getElementById('deckHit');
+
+  el.opening = document.getElementById('opening');
+  el.openingTitle = document.getElementById('openingTitle');
+  el.openingQuestion = document.getElementById('openingQuestion');
+  el.openingField = document.querySelector('.opening-field');
+  el.openingHint = document.querySelector('.opening-hint');
+  el.ringBtn = document.getElementById('ringBtn');
+  el.question = document.getElementById('question');
+  el.drawHint = document.getElementById('drawHint');
+
   el.stage = document.getElementById('stage');
   el.stageOverlay = document.getElementById('stageOverlay');
   el.slotLabels = Array.prototype.slice.call(document.querySelectorAll('.slot-label'));
-  el.drawBtn = document.getElementById('drawBtn');
   el.drawBtn2 = document.getElementById('drawBtn2');
-  el.drawHint = document.getElementById('drawHint');
   el.readingGrid = document.getElementById('readingGrid');
   el.aiCard = document.querySelector('.ai-card');
   el.aiBtn = document.getElementById('aiBtn');
   el.aiQuestion = document.querySelector('.ai-question');
   el.aiQuestionEcho = document.getElementById('aiQuestionEcho');
   el.aiOut = document.getElementById('aiOut');
-  el.question = document.getElementById('question');
 }
 
 function init() {
   cacheDom();
 
-  // 清掉历史功能遗留的本地数据（该功能已移除，不再存储任何用户抽牌记录）
-  try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (e) { /* 隐私模式下可能不可用 */ }
+  // 清掉历史功能遗留的本地数据（该功能已移除）
+  try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (e) { /* 忽略 */ }
 
-  if (typeof TAROT_CARDS === 'undefined' || TAROT_CARDS.length !== 78) {
-    if (el.drawHint) el.drawHint.textContent = '牌面数据加载失败，请刷新页面';
-    if (el.drawBtn) el.drawBtn.disabled = true;
-    return;
-  }
+  const dataOk = typeof TAROT_CARDS !== 'undefined' && TAROT_CARDS.length === 78;
+  if (!dataOk && el.drawHint) el.drawHint.textContent = '牌面数据加载失败，请刷新页面';
 
-  el.readingGrid.appendChild(elNew('p', 'read-empty', '还没有抽牌。回到上方，点击「开始抽牌」。'));
+  el.readingGrid.appendChild(elNew('p', 'read-empty', '还没有抽牌。'));
 
   /* ---- 3D 场景 ---- */
   scene = createTarotScene(el.gl);
@@ -470,35 +616,44 @@ function init() {
       el.glNotice.querySelector('.gl-notice-title').textContent =
         scene.reason === 'no-webgl' ? '你的浏览器暂不支持 3D 渲染' : '3D 场景未能启动';
       el.glNotice.querySelector('.gl-notice-text').textContent =
-        scene.reason === 'no-webgl'
-          ? '页面已切换为简洁模式，抽牌、牌义与 AI 解读都完全正常。'
-          : '页面已切换为简洁模式，功能不受影响。';
+        '已切换为简洁模式：点击牌背同样可以展开牌阵。';
     }
+    // 无 3D 时用牌背图片顶替，交互保持一致
+    if (el.deckHit) el.deckHit.hidden = false;
+  } else {
+    scene.openingShowDeck();
+    if (el.glNotice) el.glNotice.hidden = true;
   }
 
   window.addEventListener('resize', () => { if (scene && scene.ok) scene.resize(); });
   window.addEventListener('orientationchange', () => {
     setTimeout(() => { if (scene && scene.ok) scene.resize(); }, 240);
   });
-  // 移动端键盘弹出会改变可视视口，需要重新布局 3D 并立刻校正雾气位置
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
       if (scene && scene.ok) scene.resize();
-      tickOverlay();
     });
   }
 
   /* ---- 事件 ---- */
-  el.drawBtn.addEventListener('click', onDraw);
+  if (el.deckHit) el.deckHit.addEventListener('click', openFan);
+  if (el.ringBtn) el.ringBtn.addEventListener('click', onRingClick);
+  if (el.question) {
+    el.question.addEventListener('input', () => {
+      syncRing();
+      syncQuestionEcho();
+    });
+  }
   if (el.drawBtn2) el.drawBtn2.addEventListener('click', onDraw);
-  el.aiBtn.addEventListener('click', askAi);
-  el.question.addEventListener('input', syncQuestionEcho);
-  el.question.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') askAi();
-  });
+  if (el.aiBtn) el.aiBtn.addEventListener('click', askAi);
 
-  /* ---- 首屏 ---- */
-  introHero();
+  /* ---- 开场首屏动效 ---- */
+  const gsap = window.gsap;
+  if (gsap && !REDUCED && el.openingTitle) {
+    gsap.from(el.openingTitle, { y: -18, opacity: 0, duration: 1.4, ease: 'power3.out', delay: 0.15 });
+  }
+
+  syncRing();
   syncQuestionEcho();
   updateAiButton();
   tickOverlay();

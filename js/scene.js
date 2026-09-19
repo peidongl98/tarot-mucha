@@ -26,17 +26,27 @@ export const CONFIG = {
   enable3D: true,          // 总开关，false 则走 DOM 降级路径
   particleCount: 30000,    // 星云粒子数（需求默认值）
   nebulaCount: 70,         // 星云柔光团数量
-  mistCount: 1100,         // 输入框雾气粒子数（克制，可再降）
+  mistCount: 1100,         // 输入框雾气粒子数（可再降）
   mistOpacity: 0.85,       // 雾气整体强度
-  mistZ: -0.35,            // 雾气所在平面（略在卡牌之后，避免抢戏）
+  mistZ: -0.35,            // 雾气所在平面
+  enableMist: false,       // 开场改用居中无框输入，雾气与它不搭 → 关闭（实现保留，可随时恢复）
   dprMax: 2,               // 设备像素比上限
   enableNebula: true,
-  enableMist: true,
   enableFog: true,
   autoDegrade: false,      // 明确关闭：不做性能自动降级
   fov: 42,
   cardDepth: 0.03,
   textureAnisotropyMax: 4,
+
+  /* 开场：单张牌背 → 扇形展开 */
+  enableOpening: true,
+  fanCount: 9,             // 扇形张数（宽屏）
+  fanCountNarrow: 8,       // 扇形张数（窄屏，仍落在 8–10 区间）
+  fanGapRatio: 0.62,       // 相邻牌中心距 = 牌宽 × 该比例（越小越叠）
+  fanMaxAngle: 0.60,       // 扇形最大偏角（弧度，约 34°）
+  fanStagger: 0.30,        // 偏离中心每一档的错开时长
+  fanFloat: 0.075,         // 展开后各自的浮动幅度
+  fanLean: -0.10,          // 扇形整体向后仰一点，增加立体感
 };
 
 /* 降级档位建议值（供以后启用 autoDegrade 时使用，当前不自动应用） */
@@ -45,6 +55,9 @@ export const DEGRADE_PROFILES = {
   medium: { particleCount: 14000, mistCount: 500, dprMax: 1.5, enableNebula: true },
   low: { particleCount: 6000, mistCount: 0, dprMax: 1, enableNebula: false },
 };
+
+/* 开场状态机取值 */
+export const OPENING = { IDLE: 'idle', DECK: 'deck', FAN: 'fan' };
 
 const CARD_W = 1;
 const CARD_H = 1 / 0.5625;          // 牌面素材为 1080×1920，宽高比 9:16
@@ -368,6 +381,9 @@ export function createTarotScene(container) {
     projectSlot: () => null,
     cardBottomY: () => null,
     updateMist: () => {},
+    openingShowDeck: () => Promise.resolve(),
+    openingFan: () => null,
+    openingDeckRect: () => null,
     resize: () => {},
     dispose: () => {},
   };
@@ -580,6 +596,14 @@ export function createTarotScene(container) {
     return (px / w) * (2 * tanHalf * dist * camera.aspect);
   }
 
+  // 上面的反函数：世界长度对应多少屏幕像素
+  function worldToPixels(world, planeZ) {
+    const { w } = size();
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(CONFIG.fov) / 2);
+    const dist = Math.max(0.1, camera.position.z - planeZ);
+    return (world / (2 * tanHalf * dist * camera.aspect)) * w;
+  }
+
   /* app.js 每帧传入输入框的屏幕矩形与可见度，这里只做数值缓存，不读 DOM */
   api.updateMist = function (rect, visible) {
     if (!mist) return;
@@ -595,6 +619,203 @@ export function createTarotScene(container) {
       h: rect.height,
     };
     mistTarget = Math.min(1, Math.max(0, visible));
+  };
+
+  /* ============================================================
+   * 开场：单张牌背（屏幕中央）→ 扇形（屏幕上方 1/3）
+   * 位置全部由屏幕坐标反算世界坐标，因此和 DOM 布局始终对得上。
+   * ============================================================ */
+  let openingGroup = null;
+  let openingCards = [];
+  let openingState = OPENING.IDLE;
+  let openingBusy = false;
+  let openingBackTex = null;
+  let deckSlot = { x: 0, y: 0, z: 0 };
+  let deckScale = 1;
+  let fanScale = 1;
+  let fanH = 0;
+  let fanSlots = [];
+
+  function openingLayout() {
+    const { w, h } = size();
+
+    // 单张牌：屏幕正中央，高度约占视口 42%
+    const deckH = pixelsToWorld(Math.min(h * 0.42, 420), 0);
+    deckScale = deckH / CARD_H;
+    const d = screenToWorld(w / 2, h * 0.50, 0, new THREE.Vector3());
+    deckSlot = { x: d.x, y: d.y, z: 0 };
+
+    /* 扇形：屏幕上方 1/3，横向铺开、纵向压扁（避免外侧牌掉太低）
+     * 半径不再拍脑袋，而是从「相邻牌中心距」反推；同时把可用宽度当硬约束，
+     * 这样窄屏上也不会 9 张牌叠成一把。 */
+    const narrow = (w / h) < 0.9;
+    const count = narrow ? CONFIG.fanCountNarrow : CONFIG.fanCount;
+    const cardHpx = narrow ? Math.min(h * 0.20, 195) : Math.min(h * 0.25, 260);
+    const cardWpx = cardHpx * (CARD_W / CARD_H);
+    const availW = w * (narrow ? 0.92 : 0.78);
+
+    const maxSpan = Math.max(0, availW - cardWpx);
+    const wantSpan = cardWpx * CONFIG.fanGapRatio * (count - 1);
+    const spanPx = Math.min(wantSpan, maxSpan);
+
+    fanH = pixelsToWorld(cardHpx, 0);
+    fanScale = fanH / CARD_H;
+
+    const c = screenToWorld(w / 2, h * 0.16, 0, new THREE.Vector3());
+    const radius = pixelsToWorld(spanPx / 2, 0) / Math.sin(CONFIG.fanMaxAngle);
+
+    fanSlots = [];
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0 : (i - (count - 1) / 2) / ((count - 1) / 2);   // -1 .. 1
+      const a = t * CONFIG.fanMaxAngle;
+      fanSlots.push({
+        t,
+        x: c.x + Math.sin(a) * radius,
+        y: c.y - (1 - Math.cos(a)) * radius * 0.34,
+        z: -Math.abs(t) * 0.30,
+        rotZ: -a,
+      });
+    }
+  }
+
+  /* 布局用的张数可能小于已建张数（窄屏 8 / 宽屏 9），多出来的隐藏掉 */
+  function openingSyncVisibility() {
+    openingCards.forEach((c, i) => {
+      if (openingState === OPENING.FAN) {
+        const s = fanSlots[i];
+        c.root.visible = !!s;
+      }
+    });
+  }
+
+  function openingStopFloat() {
+    openingCards.forEach((c) => { if (c.floatTween) { c.floatTween.kill(); c.floatTween = null; } });
+  }
+
+  /* 展开后各自缓慢起伏，相位与周期都错开 */
+  function openingStartFloat() {
+    const gsap = window.gsap;
+    if (!gsap) return;
+    openingStopFloat();
+    openingCards.forEach((c, i) => {
+      const s = fanSlots[i];
+      if (!s) return;
+      c.floatTween = gsap.to(c.root.position, {
+        y: s.y + CONFIG.fanFloat,
+        duration: 3.0 + (i % 5) * 0.42,
+        yoyo: true, repeat: -1, ease: 'sine.inOut',
+        delay: i * 0.17,
+      });
+    });
+  }
+
+  /* 建立 9 张牌背（共用同一张背图，开销很小） */
+  async function openingBuild() {
+    if (openingGroup) return;
+    openingBackTex = await loadTexture('cards/back.jpg', anisotropy);
+    openingGroup = new THREE.Group();
+    scene.add(openingGroup);
+    openingCards = [];
+    const build = Math.max(CONFIG.fanCount, CONFIG.fanCountNarrow);
+    for (let i = 0; i < build; i++) {
+      const card = buildCard(openingBackTex, null, anisotropy);
+      card.root.visible = false;
+      card.setOpacity(0);
+      openingGroup.add(card.root);
+      openingCards.push(card);
+    }
+  }
+
+  /* 初始态：屏幕中央一张牌背 */
+  api.openingShowDeck = async function () {
+    if (!CONFIG.enableOpening) return;
+    await openingBuild();
+    openingState = OPENING.DECK;
+    openingStopFloat();
+    openingLayout();
+    openingCards.forEach((c, i) => {
+      c.root.visible = i === 0;
+      c.setOpacity(i === 0 ? 1 : 0);
+      c.root.scale.setScalar(deckScale);
+      c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z - i * 0.01);
+      c.root.rotation.set(0, 0, 0);
+    });
+
+    const gsap = window.gsap;
+    if (gsap) {
+      openingCards[0].setOpacity(0);
+      gsap.fromTo(openingCards[0].root.scale,
+        { x: deckScale * 0.9, y: deckScale * 0.9, z: deckScale * 0.9 },
+        { x: deckScale, y: deckScale, z: deckScale, duration: 1.4, ease: 'power3.out' });
+      gsap.to({ v: 0 }, {
+        v: 1, duration: 1.1, ease: 'power2.out',
+        onUpdate: function () { openingCards[0].setOpacity(this.targets()[0].v); },
+      });
+      // 单张牌也轻微呼吸
+      openingCards[0].floatTween = gsap.to(openingCards[0].root.position, {
+        y: deckSlot.y + 0.055, duration: 3.6, yoyo: true, repeat: -1, ease: 'sine.inOut',
+      });
+    } else {
+      openingCards[0].setOpacity(1);
+    }
+  };
+
+  /* 点击牌背 → 展开成扇形；返回 timeline（无 GSAP 时返回 null） */
+  api.openingFan = function () {
+    if (!CONFIG.enableOpening || !openingGroup) return null;
+    if (openingState === OPENING.FAN || openingBusy) return null;
+
+    const gsap = window.gsap;
+    openingStopFloat();
+    openingLayout();
+
+    // 先把牌叠回牌堆位置（像一叠牌）
+    const fanSlotsCount = fanSlots.length;
+    openingCards.forEach((c, i) => {
+      c.root.visible = i < fanSlotsCount;
+      c.setOpacity(1);
+      c.root.scale.setScalar(deckScale);
+      c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z - i * 0.014);
+      c.root.rotation.set(0, 0, (i - (CONFIG.fanCount - 1) / 2) * 0.012);
+    });
+
+    if (!gsap) {
+      openingCards.forEach((c, i) => {
+        const s = fanSlots[i];
+        c.root.scale.setScalar(fanScale);
+        c.root.position.set(s.x, s.y, s.z);
+        c.root.rotation.set(CONFIG.fanLean, 0, s.rotZ);
+      });
+      openingState = OPENING.FAN;
+      return null;
+    }
+
+    openingBusy = true;
+    openingState = OPENING.FAN;
+    const tl = gsap.timeline({
+      onComplete: () => { openingBusy = false; openingStartFloat(); },
+    });
+
+    openingSyncVisibility();
+    openingCards.forEach((c, i) => {
+      const s = fanSlots[i];
+      if (!s) return;
+      const delay = Math.abs(s.t) * CONFIG.fanStagger;   // 中间先动、外侧随后 → 像扇面绽开
+      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.6, ease: 'power3.out' }, delay);
+      tl.to(c.root.rotation, { x: CONFIG.fanLean, z: s.rotZ, duration: 1.6, ease: 'power3.out' }, delay);
+      tl.to(c.root.scale, { x: fanScale, y: fanScale, z: fanScale, duration: 1.3, ease: 'power2.inOut' }, delay);
+    });
+
+    return tl;
+  };
+
+  /* 牌背在屏幕上的矩形，用于放置透明点击区（canvas 是 pointer-events:none） */
+  api.openingDeckRect = function () {
+    if (openingState !== OPENING.DECK || !openingCards.length) return null;
+    const p = project(deckSlot);
+    const wpx = worldToPixels(deckScale * CARD_W, 0);
+    const hpx = worldToPixels(CARD_H * deckScale, 0);
+    return { x: p.x - wpx / 2, y: p.y - hpx / 2, w: wpx, h: hpx };
   };
 
   /* ---------- 渲染循环 ---------- */
@@ -764,11 +985,36 @@ export function createTarotScene(container) {
     scrollP = Math.max(0, Math.min(1, p || 0));
   };
 
-  api.resize = function () { layout(); };
+  api.resize = function () {
+    layout();
+    if (!openingGroup || openingBusy) return;
+    // 屏幕坐标反算世界坐标，所以尺寸变化后必须重算并复位
+    const wasFloating = openingState === OPENING.FAN;
+    openingStopFloat();
+    openingLayout();
+
+    if (openingState === OPENING.FAN) {
+      openingCards.forEach((c, i) => {
+        const s = fanSlots[i];
+        if (!s) return;
+        c.root.scale.setScalar(fanScale);
+        c.root.position.set(s.x, s.y, s.z);
+        c.root.rotation.set(CONFIG.fanLean, 0, s.rotZ);
+      });
+      if (wasFloating) openingStartFloat();
+    } else if (openingState === OPENING.DECK && openingCards[0]) {
+      openingCards[0].root.scale.setScalar(deckScale);
+      openingCards[0].root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
+      if (openingCards[0].root.visible) openingStartFloat();
+    }
+  };
 
   api.dispose = function () {
     disposed = true;
     if (raf) cancelAnimationFrame(raf);
+    openingStopFloat();
+    openingCards.forEach((c) => c.dispose());
+    openingCards = [];
     api.clear();
     renderer.dispose();
     if (renderer.domElement.parentNode) {

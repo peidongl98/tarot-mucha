@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0A0908">
 <meta name="description" content="Mucha Tarot · 抽三张牌，看见过去、现在与未来。内置 78 张公版牌义，可选用 AI 深度解读。纯娱乐。">
-<title>Mucha Tarot</title>
+<title>Tarot</title>
 <link rel="icon" href="cards/favicon.png">
 
-<!-- 字体：花体英文标题 Cinzel Decorative；其余 Cormorant Garamond；中文走系统栈 -->
+<!-- 字体：花体标题 Cinzel Decorative；其余 Cormorant Garamond；中文走系统栈 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:wght@300;400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap">
 
 <link rel="stylesheet" href="css/style.css">
 
@@ -30,23 +30,32 @@
 </head>
 <body>
 
-<!-- Layer 0：WebGL 画布容器（fixed 铺满，粒子星云 / 输入框雾气 / 3D 卡牌都渲染在这一个 canvas 里） -->
+<!-- Layer 0：WebGL 画布（粒子星云 / 3D 卡牌都在这一个 canvas 里） -->
 <div id="gl" class="gl-layer" aria-hidden="true"></div>
 
 <!-- WebGL 不可用时的友好提示 -->
 <div id="glNotice" class="gl-notice" hidden>
   <p class="gl-notice-title">你的浏览器暂不支持 3D 渲染</p>
-  <p class="gl-notice-text">页面已切换为简洁模式，抽牌与牌义功能完全正常。</p>
+  <p class="gl-notice-text">页面已切换为简洁模式，功能完全正常。</p>
 </div>
 
 <noscript>
   <div class="gl-notice">
     <p class="gl-notice-title">需要开启 JavaScript</p>
-    <p class="gl-notice-text">抽牌功能依赖 JavaScript，请在浏览器设置中开启后刷新。</p>
+    <p class="gl-notice-text">本页依赖 JavaScript，请在浏览器设置中开启后刷新。</p>
   </div>
 </noscript>
 
-<!-- 牌位标签浮层：固定在视口上，按 3D 投影对齐三张牌 -->
+<!-- 标题爆散后的星光层 -->
+<div id="burstLayer" class="burst-layer" aria-hidden="true"></div>
+
+<!-- 牌背点击区：canvas 是 pointer-events:none，所以用透明按钮对齐到 3D 牌背；
+     无 3D 时同一元素直接显示牌背图，交互保持一致 -->
+<button id="deckHit" class="deck-hit" type="button" aria-label="展开牌阵" hidden>
+  <img class="deck-hit-img" src="cards/back.jpg" alt="">
+</button>
+
+<!-- 牌位标签浮层（后续批次抽牌用，本次保留不动） -->
 <div id="stageOverlay" class="stage-overlay" aria-hidden="true">
   <div class="slot-label" data-slot="0">
     <span class="slot-pos">过去</span>
@@ -65,29 +74,32 @@
   </div>
 </div>
 
-<!-- ===== 首屏 ===== -->
-<header class="hero" id="hero">
-  <h1 class="hero-title anim-hero">
-    <span class="wordmark-line">Mucha</span>
-    <span class="wordmark-line">Tarot</span>
-  </h1>
-  <div class="hero-rule anim-hero"></div>
+<!-- ===== 开场 ===== -->
+<header class="opening" id="opening">
+  <!-- 1. 顶部花体标题（点击牌背后爆散成星光，不再回来） -->
+  <h1 class="opening-title" id="openingTitle">Tarot</h1>
 
-  <!-- 提问前移：问题在抽牌前输入，抽牌后带着问题进入后续解读 -->
-  <div class="hero-question anim-hero">
-    <textarea id="question" class="ai-input" rows="2" maxlength="200"
-      placeholder="你想问什么？" aria-label="你想问什么"></textarea>
-    <p class="question-hint">同一件事短期内不宜反复占卜，牌象会失真。</p>
+  <!-- 4. 神秘问句 -->
+  <p class="opening-question" id="openingQuestion">Whisper your question…</p>
+
+  <!-- 5. 无框输入框 -->
+  <div class="opening-field">
+    <input id="question" class="opening-input" type="text" maxlength="200"
+      autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="你想问什么">
   </div>
 
-  <div class="hero-actions anim-hero">
-    <button id="drawBtn" class="btn-primary" type="button">开 始 抽 牌</button>
-  </div>
-  <!-- 仅在数据加载失败等异常时写入内容，正常时为空 -->
-  <p id="drawHint" class="hero-hint anim-hero"></p>
+  <!-- 6. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散） -->
+  <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+  </button>
+
+  <p class="opening-hint">同一件事短期内不宜反复占卜，牌象会失真。</p>
+  <p id="drawHint" class="opening-error"></p>
 </header>
 
-<!-- ===== 3D 舞台（DOM 基本留空，让 3D 卡牌透出） ===== -->
+<!-- ===== 3D 舞台（后续批次抽牌用，本次保留不动） ===== -->
 <section class="stage" id="stage" aria-label="牌阵">
   <div class="stage-action">
     <button id="drawBtn2" class="btn-primary btn-compact" type="button">再 抽 一 次</button>
@@ -104,7 +116,6 @@
 <section class="ai" id="aiSection">
   <div class="section-rule"></div>
   <div class="ai-card">
-    <!-- 输入框在首屏，这里只回显将被使用的问题；没填则不显示 -->
     <p class="ai-question" hidden><span id="aiQuestionEcho" class="ai-question-text"></span></p>
     <div class="ai-meta">
       <button id="aiBtn" class="btn-secondary" type="button" disabled>AI 解 读</button>
