@@ -1410,6 +1410,12 @@ window.TarotDebug = {
   tilt: () => (scene && scene.openingTilt ? scene.openingTilt() : null),
   view: () => (scene && scene.getView ? scene.getView() : null),
   zoomed: () => (scene && scene.getZoomed ? scene.getZoomed() : -1),
+  wheel: () => ({
+    a: +wheel.a.toFixed(4),
+    focused: wheelFocusedIndex(),
+    focusCos: [0, 1, 2].map((i) => +wheelFocusCos(i).toFixed(3)),
+    resting: wheelResting(),
+  }),
 };
 
 if (document.readyState === 'loading') {
