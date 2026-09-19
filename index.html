@@ -17,7 +17,6 @@
 
 <!-- GSAP（UMD 全局） -->
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
 
 <!-- Three.js：importmap，零构建 -->
 <script type="importmap">
@@ -46,59 +45,68 @@
   </div>
 </noscript>
 
-<!-- 标题淡出后散开的星光：一块 canvas，空闲时 display:none，不占合成开销 -->
+<!-- 星光层：一块 canvas，空闲时 display:none -->
 <canvas id="burstLayer" class="burst-layer" aria-hidden="true"></canvas>
 
-<!-- 牌背点击区：canvas 是 pointer-events:none，所以用透明按钮对齐到 3D 牌背；
-     无 3D 时同一元素直接显示牌背图，交互保持一致 -->
+<!-- 牌背点击区：canvas 是 pointer-events:none，所以用透明按钮对齐到 3D 牌背 -->
 <button id="deckHit" class="deck-hit" type="button" aria-label="展开牌阵" hidden>
   <img class="deck-hit-img" src="cards/back.jpg" alt="">
 </button>
 
-<!-- 牌位标签浮层（后续批次抽牌用，本次保留不动） -->
-<div id="stageOverlay" class="stage-overlay" aria-hidden="true">
-  <div class="slot-label" data-slot="0">
-    <span class="slot-pos">过去</span>
-    <span class="slot-name"></span>
-    <span class="slot-badge"></span>
-  </div>
-  <div class="slot-label" data-slot="1">
-    <span class="slot-pos">现在</span>
-    <span class="slot-name"></span>
-    <span class="slot-badge"></span>
-  </div>
-  <div class="slot-label" data-slot="2">
-    <span class="slot-pos">未来</span>
-    <span class="slot-name"></span>
-    <span class="slot-badge"></span>
-  </div>
-</div>
+<!-- 三张牌的点击区（每帧对齐 3D 投影） -->
+<button id="hit0" class="card-hit" type="button" aria-label="第一张牌" hidden></button>
+<button id="hit1" class="card-hit" type="button" aria-label="第二张牌" hidden></button>
+<button id="hit2" class="card-hit" type="button" aria-label="第三张牌" hidden></button>
+
+<!-- 牌义：放大某张牌时浮出（只有文字，没有框线） -->
+<section class="card-read" id="cardRead" aria-live="polite">
+  <p class="read-pos" id="readPos"></p>
+  <h2 class="read-name" id="readName"></h2>
+  <p class="read-badge" id="readBadge"></p>
+  <p class="read-keys" id="readKeys"></p>
+  <p class="read-text" id="readText"></p>
+</section>
+
+<!-- 上滑引导：一条向上流动的星光 -->
+<div class="star-hint" id="starHint" aria-hidden="true"></div>
+
+<!-- 解读视图：光圈 + 解读文字 + 返回光球 -->
+<section class="reading-view" id="readingView">
+  <button id="aiRing" class="ai-ring" type="button" aria-label="开始解读">
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+  </button>
+  <div class="ai-text" id="aiText" aria-live="polite"></div>
+  <button id="returnOrb" class="return-orb" type="button" aria-label="保存并返回">
+    <span class="return-orb-core"></span>
+  </button>
+</section>
 
 <!-- ===== 开场 ===== -->
 <header class="opening" id="opening">
-  <!-- 0. 顶部光球展示区（最多 3 个，居中对称；从左到右：最旧 → 最新）
-       数据由 app.js 的 renderOrbs() 注入；本批次只做静态展示 + 最旧那颗呼吸 -->
+  <!-- 0. 顶部光球展示区（最多 3 个，居中对称；从左到右：最旧 → 最新） -->
   <div class="opening-orbs" id="orbRow" data-count="0" hidden></div>
 
-  <!-- 1. 顶部花体标题（点击牌背后爆散成星光，不再回来） -->
+  <!-- 1. 花体标题（点击牌背后淡出，返回开场时重新出现） -->
   <h1 class="opening-title" id="openingTitle">Tarot</h1>
 
-  <!-- 4. 神秘问句 -->
+  <!-- 2. 神秘问句 -->
   <p class="opening-question" id="openingQuestion">Whisper your question…</p>
 
-  <!-- 5. 无框输入框 -->
+  <!-- 3. 无框输入框 -->
   <div class="opening-field">
     <input id="question" class="opening-input" type="text" maxlength="200"
       autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="你想问什么">
   </div>
 
-  <!-- 6. 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
+  <!-- 4. 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
   <p class="opening-hint">
     <span>Ask once, ask true.</span>
     <span>Ask twice, the cards lie.</span>
   </p>
 
-  <!-- 7. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散） -->
+  <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散） -->
   <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
     <span class="ring-wave"></span>
     <span class="ring-wave"></span>
@@ -107,35 +115,6 @@
 
   <p id="drawHint" class="opening-error"></p>
 </header>
-
-<!-- ===== 3D 舞台（后续批次抽牌用，本次保留不动） ===== -->
-<section class="stage" id="stage" aria-label="牌阵">
-  <div class="stage-action">
-    <button id="drawBtn2" class="btn-primary btn-compact" type="button">再 抽 一 次</button>
-  </div>
-</section>
-
-<!-- ===== 牌义 ===== -->
-<main class="reading" id="reading">
-  <div class="section-rule"></div>
-  <div class="reading-grid" id="readingGrid"></div>
-</main>
-
-<!-- ===== AI 解读 ===== -->
-<section class="ai" id="aiSection">
-  <div class="section-rule"></div>
-  <div class="ai-card">
-    <p class="ai-question" hidden><span id="aiQuestionEcho" class="ai-question-text"></span></p>
-    <div class="ai-meta">
-      <button id="aiBtn" class="btn-secondary" type="button" disabled>AI 解 读</button>
-    </div>
-    <div id="aiOut" class="ai-out" aria-live="polite"></div>
-  </div>
-</section>
-
-<footer class="site-footer">
-  <div class="footer-rule"></div>
-</footer>
 
 <!-- 数据层：保持既有的全局变量形式（先于模块执行） -->
 <script src="js/data.js"></script>

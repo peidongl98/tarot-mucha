@@ -64,6 +64,13 @@ export const CONFIG = {
   deckTiltEase: 0.05,      // 每帧插值系数（60fps 下约 0.3s 到位，无弹簧感）
   deckShift: 22,           // 跟随位移上限（屏幕像素，横向）——"跟手"主要靠这段
   deckShiftYRatio: 0.62,   // 纵向位移相对横向的比例（纵向收敛些，避免顶到标题）
+
+  /* 抽牌后的三张牌 */
+  dealSpin: 0.75,          // 飞行时多转的圈数（仪式感）
+  zoomHeightRatio: 0.56,   // 放大时牌高占视口比例（另有宽度上限）
+  zoomCenterY: 0.31,       // 放大时牌心所在的视口高度比例（下方留给牌义文字）
+  topHeightRatio: 0.17,    // 固定到顶部时的牌高
+  topCenterY: 0.135,       // 顶部牌心所在的视口高度比例
 };
 
 /* 降级档位建议值（供以后启用 autoDegrade 时使用，当前不自动应用） */
@@ -74,7 +81,7 @@ export const DEGRADE_PROFILES = {
 };
 
 /* 开场状态机取值 */
-export const OPENING = { IDLE: 'idle', DECK: 'deck', FAN: 'fan' };
+export const OPENING = { IDLE: 'idle', DECK: 'deck', FAN: 'fan', EXIT: 'exit' };
 
 const CARD_W = 1;
 const CARD_H = 1 / 0.5625;          // 牌面素材为 1080×1920，宽高比 9:16
@@ -402,6 +409,15 @@ export function createTarotScene(container) {
     openingFan: () => null,
     openingDeckRect: () => null,
     openingTilt: () => ({ x: 0, y: 0, degX: 0, degY: 0, targetX: 0, targetY: 0, shiftX: 0, shiftY: 0 }),
+    dealFromFan: () => Promise.resolve(null),
+    flipCard: () => null,
+    zoomCard: () => null,
+    setView: () => null,
+    getView: () => 'row',
+    getZoomed: () => -1,
+    cardRect: () => null,
+    fadeReading: () => null,
+    resetReading: () => {},
     resize: () => {},
     dispose: () => {},
   };
@@ -555,9 +571,20 @@ export function createTarotScene(container) {
     const spread = cardW * (1 + gapRatio);                   // 保证不重叠
 
     slots = [
-      { x: -spread, y: 0, z: -zOff, rotY: 0.07 },   // 过去：稍远
-      { x: 0, y: 0, z: 0, rotY: 0 },                // 现在：居中
-      { x: spread, y: 0, z: zOff, rotY: -0.07 },    // 未来：稍近
+      { x: -spread, y: 0, z: -zOff, rotY: 0.07, scale: cardScale },   // 过去：稍远
+      { x: 0, y: 0, z: 0, rotY: 0, scale: cardScale },                // 现在：居中
+      { x: spread, y: 0, z: zOff, rotY: -0.07, scale: cardScale },    // 未来：稍近
+    ];
+
+    /* 顶部视图：三张牌缩小贴顶（上滑进解读时用），下方留给光圈与解读文字 */
+    const topH = Math.min(h * CONFIG.topHeightRatio, w * 0.30 * (CARD_H / CARD_W));
+    const topScale = topH / worldToPixels(CARD_H, 0);
+    const topSpread = topScale * 1.18;
+    const topC = screenToWorld(w / 2, h * CONFIG.topCenterY, 0, new THREE.Vector3());
+    topSlots = [
+      { x: topC.x - topSpread, y: topC.y, z: -0.30, rotY: 0.10, scale: topScale },
+      { x: topC.x, y: topC.y, z: 0, rotY: 0, scale: topScale },
+      { x: topC.x + topSpread, y: topC.y, z: 0.30, rotY: -0.10, scale: topScale },
     ];
 
     current.forEach((c, i) => {
@@ -1121,12 +1148,284 @@ export function createTarotScene(container) {
     current = [];
   };
 
+  /* ============================================================
+   * 抽牌 → 看牌 → 解读：三张牌的生命周期
+   *   dealFromFan(cards)    扇形退场 + 三张牌从扇面位置飞到中央（背面朝上）
+   *   flipCard(i)           原地绕 Y 轴翻面；逆位牌翻完后绕 Z 轴转 180°
+   *   zoomCard(i, on)       原地放大 / 收回（放大时另两张退到后面并变暗）
+   *   setView('row'|'top')  三张并列 / 三张固定到顶部
+   *   cardRect(i)           第 i 张的屏幕矩形（DOM 命中区与文字定位用）
+   *   fadeReading(on)       三张牌整体淡出（给"炸成星光"用）
+   *   resetReading()        收掉三张
+   * ============================================================ */
+  let topSlots = [];
+  let readingView = 'row';
+  let zoomed = -1;
+
+  /* 三张牌落位后的轻微浮动（错开相位） */
+  function startRowFloat(mode) {
+    const gsap = window.gsap;
+    if (!gsap) return;
+    const set = (mode || readingView) === 'top' ? topSlots : slots;
+    current.forEach((c, i) => {
+      const s = set[i];
+      if (!s) return;
+      if (c.floatTween) c.floatTween.kill();
+      c.floatTween = gsap.to(c.root.position, {
+        y: s.y + 0.045,
+        duration: 3.4 + (i % 3) * 0.5,
+        yoyo: true, repeat: -1, ease: 'sine.inOut',
+        delay: i * 0.24,
+      });
+    });
+  }
+
+  function stopRowFloat() {
+    current.forEach((c) => { if (c.floatTween) { c.floatTween.kill(); c.floatTween = null; } });
+  }
+
+  /* 抽牌：扇形旋转缩小退场，同时三张牌从扇面中部的位置飞向中央 */
+  api.dealFromFan = async function (cards) {
+    const gsap = window.gsap;
+    const backTex = await loadTexture('cards/back.jpg', anisotropy);
+    const faces = await Promise.all(cards.map((c) => loadTexture(c.src, anisotropy)));
+
+    api.clear();
+    stopRowFloat();
+    zoomed = -1;
+    readingView = 'row';
+
+    /* 1) 扇形退场：旋转 + 缩小 + 淡出 */
+    if (openingGroup && openingCards.length) {
+      openingState = OPENING.EXIT;
+      openingCards.forEach((c, i) => {
+        if (!gsap) { c.setOpacity(0); return; }
+        const d = 0.05 * Math.abs(i - (openingCards.length - 1) / 2);
+        gsap.to(c.root.rotation, { z: (c.root.rotation.z || 0) + (i % 2 ? 0.55 : -0.55), duration: 1.05, ease: 'power2.in', delay: d });
+        gsap.to(c.root.scale, { x: 0.0001, y: 0.0001, z: 0.0001, duration: 0.95, ease: 'power2.in', delay: d });
+        gsap.to({ v: 1 }, {
+          v: 0, duration: 0.9, ease: 'power2.in', delay: d,
+          onUpdate: function () { c.setOpacity(this.targets()[0].v); },
+        });
+      });
+    }
+
+    /* 2) 三张牌：起点取扇面中间三张的位置，终点是中央的三个槽位 */
+    const n = fanSlots.length || 1;
+    const mid = Math.floor(n / 2);
+    const src = [mid - 1, mid, mid + 1].map((i) => fanSlots[Math.max(0, Math.min(n - 1, i))]);
+
+    current = cards.map((c, i) => {
+      const card = buildCard(backTex, faces[i], anisotropy);
+      card.reversed = !!c.reversed;
+      card.flipped = false;
+      card.root.scale.setScalar((src[i] && src[i].scale) || fanScale || cardScale);
+      const s = src[i] || { x: 0, y: 0, z: 0, rotZ: 0 };
+      card.root.position.set(s.x, s.y, s.z);
+      // 起始多转 3/4 圈，飞行过程里转回来 → 有仪式感
+      card.root.rotation.set(CONFIG.fanLean, slots[i].rotY - Math.PI * 2 * CONFIG.dealSpin, s.rotZ || 0);
+      card.setOpacity(0);
+      cardGroup.add(card.root);
+
+      if (!gsap) {
+        card.root.scale.setScalar(slots[i].scale);
+        card.root.position.set(slots[i].x, slots[i].y, slots[i].z);
+        card.root.rotation.set(0, slots[i].rotY, 0);
+        card.setOpacity(1);
+      }
+      return card;
+    });
+
+    if (!gsap) { startRowFloat('row'); return current; }
+
+    const tl = gsap.timeline({
+      onComplete: () => { current.forEach((c) => { c.flying = false; }); startRowFloat('row'); },
+    });
+
+    tl.to({ v: 0 }, {
+      v: 1, duration: 0.5, ease: 'power2.out',
+      onUpdate: function () { current.forEach((c) => c.setOpacity(this.targets()[0].v)); },
+    }, 0.1);
+
+    current.forEach((c, i) => {
+      const s = slots[i];
+      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25, ease: 'power3.out' }, 0.24 + 0.16 * i);
+      tl.to(c.root.rotation, { x: 0, y: s.rotY, z: 0, duration: 1.25, ease: 'power3.out' }, 0.24 + 0.16 * i);
+      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.2, ease: 'power2.inOut' }, 0.24 + 0.16 * i);
+    });
+
+    return tl;
+  };
+
+  /* 翻牌：绕 Y 轴 180°；逆位牌翻完后绕 Z 轴再转 180° */
+  api.flipCard = function (i) {
+    const c = current[i];
+    if (!c || c.flipped) return null;
+    c.flipped = true;
+    const gsap = window.gsap;
+    if (!gsap) {
+      c.flipper.rotation.y = 0;
+      if (c.reversed) c.spin.rotation.z = Math.PI;
+      return null;
+    }
+    const tl = gsap.timeline();
+    tl.to(c.flipper.rotation, { y: 0, duration: 1.0, ease: 'power2.inOut' });
+    if (c.reversed) tl.to(c.spin.rotation, { z: Math.PI, duration: 0.6, ease: 'power2.inOut' }, '>-0.08');
+    return tl;
+  };
+
+  /* 直接置为"已翻开"（历史回看时用，不做动画） */
+  api.presetFlipped = function (i) {
+    const c = current[i];
+    if (!c) return;
+    c.flipped = true;
+    c.flipper.rotation.y = 0;
+    c.spin.rotation.z = c.reversed ? Math.PI : 0;
+  };
+
+  /* 放大 / 收回 */
+  api.zoomCard = function (i, on) {
+    const gsap = window.gsap;
+    const c = current[i];
+    if (!c) return null;
+    const { w, h } = size();
+    const zPlane = 0;
+
+    if (!gsap) {
+      if (on) {
+        const targetH = Math.min(h * CONFIG.zoomHeightRatio, w * 1.529);
+        const s = targetH / worldToPixels(CARD_H, zPlane);
+        const p = screenToWorld(w / 2, h * CONFIG.zoomCenterY, zPlane, new THREE.Vector3());
+        c.root.scale.setScalar(s);
+        c.root.position.set(p.x, p.y, zPlane);
+        c.root.rotation.set(0, 0, 0);
+        zoomed = i;
+      } else {
+        const s = slots[i];
+        c.root.scale.setScalar(s.scale);
+        c.root.position.set(s.x, s.y, s.z);
+        c.root.rotation.set(0, s.rotY, 0);
+        current.forEach((o) => o.setOpacity(1));
+        zoomed = -1;
+      }
+      return null;
+    }
+
+    stopRowFloat();
+    const tl = gsap.timeline();
+
+    if (on) {
+      zoomed = i;
+      const targetH = Math.min(h * CONFIG.zoomHeightRatio, w * 1.529);
+      const s = targetH / worldToPixels(CARD_H, zPlane);
+      const p = screenToWorld(w / 2, h * CONFIG.zoomCenterY, zPlane, new THREE.Vector3());
+      tl.to(c.root.scale, { x: s, y: s, z: s, duration: 0.9, ease: 'power3.inOut' }, 0);
+      tl.to(c.root.position, { x: p.x, y: p.y, z: zPlane, duration: 0.9, ease: 'power3.inOut' }, 0);
+      tl.to(c.root.rotation, { x: 0, y: 0, z: 0, duration: 0.9, ease: 'power3.inOut' }, 0);
+      // 另两张退到后面并变暗
+      current.forEach((o, j) => {
+        if (j === i) return;
+        tl.to(o.root.position, { z: -1.8, duration: 0.8, ease: 'power2.inOut' }, 0);
+        tl.to({ v: o.materials[0].opacity }, {
+          v: 0.1, duration: 0.7,
+          onUpdate: function () { o.setOpacity(this.targets()[0].v); },
+        }, 0);
+      });
+    } else {
+      zoomed = -1;
+      current.forEach((o, j) => {
+        const s = slots[j];
+        tl.to(o.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        tl.to(o.root.position, { x: s.x, y: s.y, z: s.z, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        tl.to(o.root.rotation, { x: 0, y: s.rotY, z: 0, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        tl.to({ v: o.materials[0].opacity }, {
+          v: 1, duration: 0.5,
+          onUpdate: function () { o.setOpacity(this.targets()[0].v); },
+        }, 0);
+      });
+      tl.add(() => { readingView = 'row'; startRowFloat('row'); });
+    }
+    return tl;
+  };
+
+  /* 三张牌在「并列」与「固定到顶部」之间切换 */
+  api.setView = function (mode) {
+    const gsap = window.gsap;
+    if (!current.length) { readingView = mode; return null; }
+    const set = mode === 'top' ? topSlots : slots;
+    stopRowFloat();
+    if (!gsap) {
+      current.forEach((c, i) => {
+        const s = set[i];
+        c.root.scale.setScalar(s.scale);
+        c.root.position.set(s.x, s.y, s.z);
+        c.root.rotation.set(0, s.rotY, 0);
+      });
+      readingView = mode;
+      return null;
+    }
+    const tl = gsap.timeline({
+      onComplete: () => { readingView = mode; startRowFloat(mode); },
+    });
+    current.forEach((c, i) => {
+      const s = set[i];
+      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
+      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
+      tl.to(c.root.rotation, { x: 0, y: s.rotY, z: 0, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
+    });
+    return tl;
+  };
+
+  api.getView = () => readingView;
+  api.getZoomed = () => zoomed;
+
+  /* 第 i 张牌的屏幕矩形（含当前缩放/位移） */
+  api.cardRect = function (i) {
+    const c = current[i];
+    if (!c) return null;
+    const p = project(c.root.position);
+    const sc = c.root.scale.x;
+    const wpx = worldToPixels(CARD_W * sc, c.root.position.z);
+    const hpx = worldToPixels(CARD_H * sc, c.root.position.z);
+    return { x: p.x - wpx / 2, y: p.y - hpx / 2, w: wpx, h: hpx };
+  };
+
+  /* 三张牌整体淡出（"炸成星光"前先把实体收掉） */
+  api.fadeReading = function (on) {
+    const gsap = window.gsap;
+    stopRowFloat();
+    if (!gsap) { current.forEach((c) => c.setOpacity(on ? 0 : 1)); return null; }
+    return gsap.to({ v: on ? 1 : 0 }, {
+      v: on ? 0 : 1, duration: 0.6, ease: 'power2.out',
+      onUpdate: function () { current.forEach((c) => c.setOpacity(this.targets()[0].v)); },
+    });
+  };
+
+  api.resetReading = function () {
+    stopRowFloat();
+    api.clear();
+    readingView = 'row';
+    zoomed = -1;
+  };
+
   api.setScrollProgress = function (p) {
     scrollP = Math.max(0, Math.min(1, p || 0));
   };
 
   api.resize = function () {
     layout();
+    // 三张牌也按新尺寸复位（放大态与顶部态用各自的落位）
+    if (current.length) {
+      const set = readingView === 'top' ? topSlots : slots;
+      current.forEach((c, i) => {
+        if (i === zoomed) return;
+        const s = set[i];
+        if (!s) return;
+        c.root.scale.setScalar(s.scale);
+        c.root.position.set(s.x, s.y, s.z);
+        c.root.rotation.set(0, s.rotY, 0);
+      });
+    }
     if (!openingGroup || openingBusy) return;
     // 屏幕坐标反算世界坐标，所以尺寸变化后必须重算并复位
     const wasFloating = openingState === OPENING.FAN;
