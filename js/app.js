@@ -839,8 +839,7 @@ function splitReading(text) {
     .map((b) => {
       const joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       if (!joined.length) return '';
-      const cjk = (b.match(/[\u4e00-\u9fff]/g) || []).length;
-      return joined.join(cjk >= 2 ? '' : ' ');      // 英文换行补空格，中文直接连
+      return joined.join(' ');                      // 段内软换行以空格相连（含中英双免责相邻行）
     })
     .filter(Boolean);
   const en = [];
