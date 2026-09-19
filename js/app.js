@@ -6,10 +6,10 @@
  *   js/scene.js      -> createTarotScene（ES module）
  *   window.gsap / window.ScrollTrigger（CDN，UMD 全局）
  *
- * 本批次只做「开场」，流程：
- *   单张牌背（屏幕中央）+ 顶部花体标题
- *   → 点击牌背：展开成 9 张扇形（屏幕上方 1/3），标题同时炸成星光并消失
- *   → 扇面下方淡入神秘问句 + 无框输入框 + 泛涟漪光圈
+ * 本批次只做「开场」+ 顶部光球展示，流程：
+ *   顶部光球（最多 3 个，来自抽牌记录） + 花体标题 + 屏幕中央单张牌背
+ *   → 点击牌背：展开成扇形（圆心在页面顶部，牌向下方辐射），标题同时炸成星光并消失
+ *   → 扇面下方淡入神秘问句 + 无框输入框 + 传统提示（英文两行） + 泛涟漪光圈
  *
  * 抽牌 / 看牌 / 上滑解读留给后续批次：
  *   showReading / onDraw / AI 相关代码全部保留可用，只是当前没有触发入口
@@ -26,6 +26,10 @@ const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-moti
 
 /* 早期版本用 localStorage 存抽牌历史，该功能已移除；顺手清掉遗留键 */
 const LEGACY_STORAGE_KEY = 'tarot_history';
+
+/* 开场顶部光球：最多 3 个，从左到右 = 最旧 → 最新 */
+const ORB_MAX = 3;
+const ORB_STORAGE_KEY = 'tarot_orbs';   // 预留键名（本批次不写入）
 
 const el = {};
 let scene = null;
@@ -215,7 +219,8 @@ async function explodeTitle() {
  * ============================================================ */
 
 function showAskArea() {
-  const targets = [el.openingQuestion, el.openingField, el.ringBtn, el.openingHint]
+  // 顺序与视觉顺序一致：问句 → 输入框 → 提示小字 → 光圈
+  const targets = [el.openingQuestion, el.openingField, el.openingHint, el.ringBtn]
     .filter(Boolean);
   const gsap = window.gsap;
 
@@ -240,6 +245,67 @@ function focusOnDesktop() {
     try { el.question.focus({ preventScroll: true }); } catch (e) { el.question.focus(); }
   }
 }
+
+/* ============================================================
+ * 开场 · 顶部光球展示
+ * 最多 3 个，居中对称；从左到右 = 最旧 → 最新。
+ * 最旧那颗缓慢呼吸，其余常亮；只有 1 个时也常亮。
+ *
+ * 本批次只做「静态展示 + 闪烁状态」，不做点击回看 / 炸成星光 / 挤入动画。
+ * 数据接口（后续批次接真实记录，UI 无需再改）：
+ *   window.TarotOrbs.render(records)   渲染 0–3 个光球
+ *   window.TarotOrbs.read()            读取来源（当前返回 []，即不显示）
+ * 记录结构约定（后续批次读写共用，本批次只用到数组长度与顺序）：
+ *   { at: 毫秒时间戳, question: '提问', cards: [{ id: 'major-00', reversed: false }] }
+ * ============================================================ */
+
+function readOrbRecords() {
+  // 本批次不做读取：无记录 → 不显示光球。
+  // 后续批次把这里换成 JSON.parse(localStorage.getItem(ORB_STORAGE_KEY) || '[]')，
+  // 再把结果交给 renderOrbs() 即可。
+  void ORB_STORAGE_KEY;
+  return [];
+}
+
+function renderOrbs(records) {
+  if (!el.orbRow) return [];
+  const list = (Array.isArray(records) ? records : []).filter(Boolean).slice(-ORB_MAX);
+
+  el.orbRow.textContent = '';
+  const nodes = list.map((rec, i) => {
+    const orb = document.createElement('span');
+    // 最旧的那颗呼吸；只有 1 个时保持常亮
+    orb.className = 'orb' + (list.length > 1 && i === 0 ? ' is-aging' : '');
+    orb.dataset.index = String(i);
+    orb.dataset.at = rec && rec.at != null ? String(rec.at) : '';
+    el.orbRow.appendChild(orb);
+    return orb;
+  });
+
+  el.orbRow.hidden = list.length === 0;
+  el.orbRow.dataset.count = String(list.length);
+
+  // 首屏淡入（CSS 里预设了 opacity:0，所以必须用 fromTo，不能用 from）
+  if (list.length) {
+    const gsap = window.gsap;
+    if (gsap && !REDUCED) {
+      gsap.fromTo(el.orbRow,
+        { opacity: 0, y: -8 },
+        { opacity: 1, y: 0, duration: 1.2, ease: 'power3.out', delay: 0.35 });
+    } else {
+      el.orbRow.style.opacity = '1';
+    }
+  }
+  return nodes;
+}
+
+/* 后续批次接入点：光球点击回看、炸成星光、新光球挤入都从这里取数据 */
+window.TarotOrbs = {
+  max: ORB_MAX,
+  storageKey: ORB_STORAGE_KEY,
+  read: readOrbRecords,
+  render: renderOrbs,
+};
 
 /* ============================================================
  * 开场 · 点击牌背展开扇形
@@ -576,6 +642,7 @@ function cacheDom() {
   el.deckHit = document.getElementById('deckHit');
 
   el.opening = document.getElementById('opening');
+  el.orbRow = document.getElementById('orbRow');
   el.openingTitle = document.getElementById('openingTitle');
   el.openingQuestion = document.getElementById('openingQuestion');
   el.openingField = document.querySelector('.opening-field');
@@ -656,6 +723,10 @@ function init() {
   syncRing();
   syncQuestionEcho();
   updateAiButton();
+
+  /* ---- 顶部光球：本批次无记录 → 不显示；接口已就绪，供后续批次接入 ---- */
+  renderOrbs(readOrbRecords());
+
   tickOverlay();
   armCameraScroll();
 }

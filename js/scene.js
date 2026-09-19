@@ -38,12 +38,16 @@ export const CONFIG = {
   cardDepth: 0.03,
   textureAnisotropyMax: 4,
 
-  /* 开场：单张牌背 → 扇形展开 */
+  /* 开场：单张牌背 → 扇形展开
+   * 扇形圆心在「页面顶部的正中竖线上」（实际可能在顶边之上，见 openingLayout），
+   * 牌从圆心向下方辐射：外侧牌更高、中间牌最低，长轴沿半径指向圆心。 */
   enableOpening: true,
   fanCount: 9,             // 扇形张数（宽屏）
   fanCountNarrow: 8,       // 扇形张数（窄屏，仍落在 8–10 区间）
-  fanGapRatio: 0.62,       // 相邻牌中心距 = 牌宽 × 该比例（越小越叠）
-  fanMaxAngle: 0.60,       // 扇形最大偏角（弧度，约 34°）
+  fanGapRatio: 0.75,       // 相邻牌中心距 = 牌宽 × 该比例（越小越叠）
+  fanMaxAngle: 0.85,       // 最外侧牌的偏角（弧度，约 49°）：决定弧的深浅
+  fanTopRatio: 0.075,      // 扇形最上沿距页面顶部（占视口高度，另有像素下限）
+  fanBandRatio: 0.32,      // 扇形所在竖直带的基准高度（占视口高度）
   fanStagger: 0.30,        // 偏离中心每一档的错开时长
   fanFloat: 0.075,         // 展开后各自的浮动幅度
   fanLean: -0.10,          // 扇形整体向后仰一点，增加立体感
@@ -622,7 +626,7 @@ export function createTarotScene(container) {
   };
 
   /* ============================================================
-   * 开场：单张牌背（屏幕中央）→ 扇形（屏幕上方 1/3）
+   * 开场：单张牌背（屏幕中央）→ 扇形（圆心在页面顶部，牌向下方辐射，覆盖上方约 1/3）
    * 位置全部由屏幕坐标反算世界坐标，因此和 DOM 布局始终对得上。
    * ============================================================ */
   let openingGroup = null;
@@ -645,12 +649,13 @@ export function createTarotScene(container) {
     const d = screenToWorld(w / 2, h * 0.50, 0, new THREE.Vector3());
     deckSlot = { x: d.x, y: d.y, z: 0 };
 
-    /* 扇形：屏幕上方 1/3，横向铺开、纵向压扁（避免外侧牌掉太低）
-     * 半径不再拍脑袋，而是从「相邻牌中心距」反推；同时把可用宽度当硬约束，
-     * 这样窄屏上也不会 9 张牌叠成一把。 */
+    /* 扇形：圆心在页面顶部正中竖线上，牌向下方辐射（穹形，不是手持扇那种凸上）
+     * 半径由「最外侧牌的水平偏移 = 半个展开宽度」反推，展开宽度同时受屏幕宽度硬约束；
+     * 圆心 y 不写死，而是先量出整团牌的实际上下范围，再让它落进上方那条带里——
+     * 因此圆心通常落在页面顶边之上，这正是「从页面顶部向下方辐射」的观感来源。 */
     const narrow = (w / h) < 0.9;
     const count = narrow ? CONFIG.fanCountNarrow : CONFIG.fanCount;
-    const cardHpx = narrow ? Math.min(h * 0.20, 195) : Math.min(h * 0.25, 260);
+    const cardHpx = Math.min(h * 0.20, narrow ? 180 : 200);
     const cardWpx = cardHpx * (CARD_W / CARD_H);
     const availW = w * (narrow ? 0.92 : 0.78);
 
@@ -661,21 +666,34 @@ export function createTarotScene(container) {
     fanH = pixelsToWorld(cardHpx, 0);
     fanScale = fanH / CARD_H;
 
-    const c = screenToWorld(w / 2, h * 0.16, 0, new THREE.Vector3());
-    const radius = pixelsToWorld(spanPx / 2, 0) / Math.sin(CONFIG.fanMaxAngle);
+    const aMax = CONFIG.fanMaxAngle;
+    const radiusPx = Math.max(1, (spanPx / 2) / Math.sin(aMax));
 
-    fanSlots = [];
+    // 先以圆心为原点排出每张牌（向下为正），并量出各自旋转后的竖直半高
+    const raw = [];
     for (let i = 0; i < count; i++) {
       const t = count === 1 ? 0 : (i - (count - 1) / 2) / ((count - 1) / 2);   // -1 .. 1
-      const a = t * CONFIG.fanMaxAngle;
-      fanSlots.push({
-        t,
-        x: c.x + Math.sin(a) * radius,
-        y: c.y - (1 - Math.cos(a)) * radius * 0.34,
-        z: -Math.abs(t) * 0.30,
-        rotZ: -a,
-      });
+      const a = t * aMax;
+      const halfV = (cardHpx * Math.cos(a) + cardWpx * Math.sin(Math.abs(a))) / 2;
+      raw.push({ t, a, dx: Math.sin(a) * radiusPx, dy: Math.cos(a) * radiusPx, halfV });
     }
+    const topMost = Math.min.apply(null, raw.map((r) => r.dy - r.halfV));
+    const botMost = Math.max.apply(null, raw.map((r) => r.dy + r.halfV));
+    const spanH = Math.max(1, botMost - topMost);
+
+    const bandTop = Math.max(52, h * CONFIG.fanTopRatio);
+    const bandH = Math.max(spanH, h * CONFIG.fanBandRatio);
+    const pivotYpx = bandTop + (bandH - spanH) / 2 - topMost;   // 圆心的屏幕 y（可为负 = 在页面之上）
+
+    const pivot = screenToWorld(w / 2, pivotYpx, 0, new THREE.Vector3());
+
+    fanSlots = raw.map((r) => ({
+      t: r.t,
+      x: pivot.x + pixelsToWorld(r.dx, 0),
+      y: pivot.y - pixelsToWorld(r.dy, 0),        // 屏幕向下 = 世界 -y
+      z: -Math.abs(r.t) * 0.30,
+      rotZ: r.a,                                  // 长轴沿半径 → 牌自顶部圆心向外辐射
+    }));
   }
 
   /* 布局用的张数可能小于已建张数（窄屏 8 / 宽屏 9），多出来的隐藏掉 */

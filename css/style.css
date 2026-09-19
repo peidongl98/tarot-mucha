@@ -33,12 +33,15 @@
                'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
 
   /* 开场各阶段落位（占开场高度的百分比） */
+  --y-orbs: 3.2%;            /* 顶部光球展示区 */
   --y-title: 10%;
-  --y-question: 49.5%;
-  --y-field: 57%;
-  --y-ring: 73%;
-  --y-hint: 83.5%;
+  --y-question: 47%;
+  --y-field: 54.5%;
+  --y-hint: 64%;             /* 传统提示：放在输入框下方、光圈上方 */
+  --y-ring: 74%;
   --ring-size: 78px;
+  --orb-size: 13px;
+  --orb-gap: 15px;
 
   /* 节奏 */
   --gap-section: 104px;
@@ -131,6 +134,51 @@ body:not(.has-draw) .site-footer { display: none; }
   z-index: 1;
   height: 100vh;
   height: 100svh;
+}
+
+/* ---------- 0. 顶部光球展示（0 个则不显示；1 个居中；2/3 个居中对称） ---------- */
+.opening-orbs {
+  position: absolute;
+  top: var(--y-orbs);
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--orb-gap);
+  height: var(--orb-size);
+  opacity: 0;                 /* 由 JS 淡入 */
+}
+
+.opening-orbs[hidden] { display: none; }
+
+.orb {
+  flex: none;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%,
+    rgba(255, 252, 244, 0.98) 0%,
+    rgba(233, 214, 168, 0.92) 30%,
+    rgba(201, 169, 97, 0.78) 58%,
+    rgba(201, 169, 97, 0.14) 100%);
+  box-shadow:
+    0 0 10px rgba(201, 169, 97, 0.5),
+    0 0 22px rgba(201, 169, 97, 0.2);
+}
+
+/* 最旧的那颗：缓慢呼吸式明灭（只有 1 个时保持常亮，不加这个类） */
+.orb.is-aging { animation: orbAging 4.6s ease-in-out infinite; }
+
+@keyframes orbAging {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(201, 169, 97, 0.5), 0 0 22px rgba(201, 169, 97, 0.2);
+  }
+  50% {
+    opacity: 0.24;
+    box-shadow: 0 0 4px rgba(201, 169, 97, 0.18), 0 0 10px rgba(201, 169, 97, 0.06);
+  }
 }
 
 /* ---------- 1. 顶部花体标题 ---------- */
@@ -263,6 +311,11 @@ body:not(.has-draw) .site-footer { display: none; }
 .ring-wave:nth-child(2) { animation-delay: 1.5s; }
 .ring-wave:nth-child(3) { animation-delay: 3.0s; }
 
+/* 注意：`.opening-ring.is-active .ring-wave` 里的 animation 简写会把 animation-delay
+   一起重置为 0，且特异性更高，所以有字状态必须再写一遍延迟，否则三层涟漪会同步扑出。 */
+.opening-ring.is-active .ring-wave:nth-child(2) { animation-delay: 1.5s; }
+.opening-ring.is-active .ring-wave:nth-child(3) { animation-delay: 3.0s; }
+
 @keyframes ringWave {
   0%   { transform: translate(-50%, -50%) scale(0.96); opacity: 0; }
   10%  { opacity: 0.52; }
@@ -279,17 +332,24 @@ body:not(.has-draw) .site-footer { display: none; }
   100% { transform: scale(1);    border-color: rgba(201, 169, 97, 0.62); }
 }
 
-/* ---------- 占卜提示（按要求保留） ---------- */
+/* ---------- 传统提示（英文两行，衬线斜体，纯提示不做限制） ---------- */
 .opening-hint {
   position: absolute;
   top: var(--y-hint);
   left: 0;
   right: 0;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   text-align: center;
-  font-size: 11.5px;
-  letter-spacing: 0.04em;
-  color: var(--faint);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(12px, 1.1vw, 13.5px);
+  line-height: 1.75;
+  letter-spacing: 0.05em;
+  color: var(--muted);
   opacity: 0;
 }
 
@@ -783,12 +843,15 @@ body.no-3d .read-thumb {
   :root {
     --gap-section: var(--gap-section-sm);
     --pad-x: 20px;
+    --y-orbs: 3%;
     --y-title: 9%;
-    --y-question: 48%;
-    --y-field: 55.5%;
-    --y-ring: 71%;
-    --y-hint: 81.5%;
+    --y-question: 46%;
+    --y-field: 53.5%;
+    --y-hint: 62.5%;
+    --y-ring: 72.5%;
     --ring-size: 70px;
+    --orb-size: 12px;
+    --orb-gap: 13px;
   }
 
   .reading-grid { grid-template-columns: 1fr; gap: 18px; }
@@ -801,11 +864,12 @@ body.no-3d .read-thumb {
 /* 矮屏（横屏手机、小笔记本）再压紧一点，保证输入框不落到键盘区 */
 @media (max-height: 720px) {
   :root {
+    --y-orbs: 2.6%;
     --y-title: 7.5%;
-    --y-question: 45%;
-    --y-field: 53%;
-    --y-ring: 68%;
-    --y-hint: 79%;
+    --y-question: 43%;
+    --y-field: 51%;
+    --y-hint: 60%;
+    --y-ring: 70%;
     --ring-size: 64px;
   }
 }
@@ -819,6 +883,7 @@ body.no-3d .read-thumb {
 /* 尊重系统的减弱动效偏好 */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
+  .orb.is-aging { animation: none; }
   .ring-wave { animation: none !important; }
   .opening-ring.is-pulsing { animation: none; }
   .ai-card.is-loading { animation: none; border-color: var(--gold-dim); }
