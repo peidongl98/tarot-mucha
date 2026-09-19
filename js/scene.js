@@ -58,8 +58,6 @@ export const CONFIG = {
   deckFloatY: 0.018,       // 上下摆幅（约 6px）
   deckFloatDurX: 8.4,      // 左右往返单程时长（秒）
   deckFloatDurY: 10.2,     // 上下往返单程时长（秒）——与 X 不同，避免看出规律
-  deckRaisedY: 0.278,      // 抬升态：牌心所在高度（返回开场、问句等已重现时用，避免文字压牌）
-  deckRaisedH: 0.28,       // 抬升态：牌高占视口比例
 
   /* 指针跟随：单张牌背转向并移向鼠标 / 手指（要看得出来，但仍克制） */
   deckTiltMax: 0.14,       // 最大倾角（弧度，约 8°，需求上限 5–8°）
@@ -420,7 +418,6 @@ export function createTarotScene(container) {
     cardBottomY: () => null,
     updateMist: () => {},
     openingShowDeck: () => Promise.resolve(),
-    setDeckRaised: () => {},
     openingFan: () => null,
     openingDeckRect: () => null,
     openingTilt: () => ({ x: 0, y: 0, degX: 0, degY: 0, targetX: 0, targetY: 0, shiftX: 0, shiftY: 0 }),
@@ -704,7 +701,6 @@ export function createTarotScene(container) {
   let openingBackTex = null;
   let deckSlot = { x: 0, y: 0, z: 0 };
   let deckScale = 1;
-  let deckRaised = false;
   let fanScale = 1;
   let fanH = 0;
   let fanSlots = [];
@@ -712,11 +708,10 @@ export function createTarotScene(container) {
   function openingLayout() {
     const { w, h } = size();
 
-    // 单张牌：默认屏幕正中央（占视口 42%）；抬升态时移到上方并缩小，给下方的问句留白
-    const deckHpx = deckRaised ? Math.min(h * CONFIG.deckRaisedH, 300) : Math.min(h * 0.42, 420);
-    const deckH = pixelsToWorld(deckHpx, 0);
+    // 单张牌：屏幕正中央（占视口 42%）
+    const deckH = pixelsToWorld(Math.min(h * 0.42, 420), 0);
     deckScale = deckH / CARD_H;
-    const d = screenToWorld(w / 2, h * (deckRaised ? CONFIG.deckRaisedY : 0.50), 0, new THREE.Vector3());
+    const d = screenToWorld(w / 2, h * 0.50, 0, new THREE.Vector3());
     deckSlot = { x: d.x, y: d.y, z: 0 };
 
     /* 扇形：圆心在页面顶部正中竖线上，牌向下方辐射（穹形，不是手持扇那种凸上）
@@ -896,21 +891,6 @@ export function createTarotScene(container) {
     shiftX: worldToPixels(shiftNow.x, 0),
     shiftY: -worldToPixels(shiftNow.y, 0),
   });
-
-  /* 抬升态：牌背移到上方并缩小（返回开场、问句/输入/提示/光圈已重现时用） */
-  api.setDeckRaised = function (on) {
-    const next = !!on;
-    if (next === deckRaised) return;
-    deckRaised = next;
-    if (openingState !== OPENING.DECK) return;
-    openingLayout();
-    if (!openingCards.length) return;
-    if (window.gsap) openingFloatDeck();
-    else {
-      openingCards[0].root.scale.setScalar(deckScale);
-      openingCards[0].root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
-    }
-  };
 
   /* 初始态：屏幕中央一张牌背 */
   api.openingShowDeck = async function () {

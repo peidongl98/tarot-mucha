@@ -467,26 +467,58 @@ function openFan() {
   state = S.ASK;
 }
 
-function showAskArea() {
+/* 问句 / 输入 / 提示 / 光圈：只在「状态 2（点牌背后）」出现。
+ * 状态 1（开场）、状态 3+（抽牌后）、历史回看里都必须完全隐藏（含 visibility，
+ * 否则透明输入框会挡住底下牌背的点击）。 */
+function setAskVisible(on, instant) {
   const targets = [el.openingQuestion, el.openingField, el.openingHint, el.ringBtn].filter(Boolean);
   const gsap = window.gsap;
-  if (!gsap || REDUCED) {
-    targets.forEach((n) => { n.style.opacity = '1'; n.style.transform = 'none'; });
-    focusOnDesktop();
+  if (on) {
+    targets.forEach((n) => { n.style.visibility = ''; });
+    if (!gsap || REDUCED || instant) {
+      targets.forEach((n) => { n.style.opacity = '1'; n.style.transform = 'none'; });
+      focusOnDesktop();
+      return;
+    }
+    gsap.fromTo(targets,
+      { opacity: 0, y: 16 },
+      { opacity: 1, y: 0, duration: 1.0, stagger: 0.16, ease: 'power3.out', delay: 0.8, onComplete: focusOnDesktop });
     return;
   }
-  gsap.fromTo(targets,
-    { opacity: 0, y: 16 },
-    { opacity: 1, y: 0, duration: 1.0, stagger: 0.16, ease: 'power3.out', delay: 0.8, onComplete: focusOnDesktop });
+  if (instant || !gsap || REDUCED) {
+    targets.forEach((n) => { n.style.opacity = '0'; n.style.visibility = 'hidden'; });
+    return;
+  }
+  return new Promise((res) => {
+    gsap.to(targets, {
+      opacity: 0, y: -10, duration: 0.6, stagger: 0.06, ease: 'power2.in',
+      onComplete: () => { targets.forEach((n) => { n.style.visibility = 'hidden'; }); res(); },
+    });
+  });
 }
 
-function hideAskArea() {
-  const targets = [el.openingQuestion, el.openingField, el.openingHint, el.ringBtn].filter(Boolean);
+function showAskArea() { setAskVisible(true); }
+function hideAskArea() { return setAskVisible(false) || Promise.resolve(); }
+
+/* 花体标题：开场出现；点牌背后淡出成星光；历史进入时直接淡出 */
+function showTitle(on) {
+  const t = el.openingTitle;
+  if (!t) return;
   const gsap = window.gsap;
-  if (!gsap || REDUCED) { targets.forEach((n) => { n.style.opacity = '0'; }); return Promise.resolve(); }
-  return new Promise((res) => {
-    gsap.to(targets, { opacity: 0, y: -10, duration: 0.6, stagger: 0.06, ease: 'power2.in', onComplete: res });
-  });
+  if (on) {
+    delete t.dataset.gone;
+    t.style.visibility = 'visible';
+    if (gsap && !REDUCED) gsap.fromTo(t, { opacity: 0 }, { opacity: 1, duration: 1.2, ease: 'power3.out' });
+    else t.style.opacity = '1';
+    return;
+  }
+  if (t.dataset.gone === '1') return;
+  t.dataset.gone = '1';
+  if (gsap && !REDUCED) {
+    gsap.to(t, { opacity: 0, duration: 0.5, ease: 'power2.in', onComplete: () => { t.style.visibility = 'hidden'; } });
+  } else {
+    t.style.visibility = 'hidden';
+  }
 }
 
 /* 桌面端自动落焦点，用户可以直接开始打字；移动端不自动唤起键盘 */
@@ -997,10 +1029,9 @@ async function finishAndReturn() {
   currentAt = null;
 }
 
-/* 回到开场：单张牌背居中 + 标题重现 + 问句/输入/提示/光圈重现 */
+/* 回到开场 */
 async function resetOpening(opts) {
   const o = opts || {};
-  const gsap = window.gsap;
 
   if (scene && scene.ok) scene.resetReading();
   clearAiText();
@@ -1009,9 +1040,11 @@ async function resetOpening(opts) {
   el.returnOrb.classList.remove('is-on');
   hideMeaning();
   showStarHint(false);
+  if (el.wheelLabel) el.wheelLabel.classList.remove('is-on');
 
   cardsFlipped = [false, false, false];
   zoomIndex = -1;
+  wheelLabelIndex = -1;
   for (let i = 0; i < 3; i++) setHitFace(i, false);
   updateHits();
 
@@ -1020,39 +1053,22 @@ async function resetOpening(opts) {
   setInputLocked(false);
   syncRing();
 
-  // 标题重现
-  const t = el.openingTitle;
-  if (t) {
-    delete t.dataset.gone;
-    t.style.visibility = 'visible';
-    if (gsap && !REDUCED) gsap.fromTo(t, { opacity: 0 }, { opacity: 1, duration: 1.3, ease: 'power3.out' });
-    else t.style.opacity = '1';
-  }
+  // 问句 / 输入 / 提示 / 光圈：状态 1 不出现，直接隐藏
+  setAskVisible(false, true);
 
-  // 单张牌背重新出现（抬到上方，避免与问句/输入/提示/光圈重叠）
+  // 标题重现
+  showTitle(true);
+
+  // 单张牌背重新出现（居中，不是抬升 —— 与首次进入完全一致）
   deckShown = true;
   openingOpened = false;
-  if (scene && scene.ok) {
-    scene.setDeckRaised(true);
-    await scene.openingShowDeck();
-  }
-  else layoutFallbackCards();
-
-  // 问句 / 输入 / 提示 / 光圈重新出现
-  const targets = [el.openingQuestion, el.openingField, el.openingHint, el.ringBtn].filter(Boolean);
-  if (gsap && !REDUCED) {
-    gsap.fromTo(targets,
-      { opacity: 0, y: 14 },
-      { opacity: 1, y: 0, duration: 1.0, stagger: 0.14, ease: 'power3.out', delay: 0.5 });
-  } else {
-    targets.forEach((n) => { n.style.opacity = '1'; n.style.transform = 'none'; });
-  }
+  if (scene && scene.ok) await scene.openingShowDeck();
 
   // 光球队列：新光球从右侧挤入，已有光球被挤动
   renderOrbs(records, { animateNew: !!o.animateNew, fadeIn: false });
   el.orbRow.style.opacity = '1';
 
-  state = S.ASK;
+  state = S.OPENING;
 }
 
 /* ============================================================
@@ -1060,7 +1076,7 @@ async function resetOpening(opts) {
  * ============================================================ */
 
 async function restoreRecord(rec) {
-  if (state !== S.OPENING && state !== S.ASK && state !== S.ROW) return;
+  if (state !== S.OPENING && state !== S.ASK) return;
   if (!rec || !rec.cards || rec.cards.length !== 3) return;
 
   fromHistory = true;
@@ -1071,8 +1087,9 @@ async function restoreRecord(rec) {
   cardsFlipped = [true, true, true];
   zoomIndex = -1;
 
-  // 开场先收干净
-  if (scene && scene.ok) scene.resetReading();
+  // 问题界面必须完全隐藏（不能与滚筒重叠）
+  setAskVisible(false, true);
+  showTitle(false);
   hideMeaning();
   showStarHint(false);
   el.question.value = lastQuestion;
@@ -1082,6 +1099,9 @@ async function restoreRecord(rec) {
   deckShown = false;
   if (el.deckHit) el.deckHit.hidden = true;
 
+  wheel.a = 0;
+  if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
+
   if (scene && scene.ok) {
     await scene.dealFromFan(lastReading.map((c) => ({
       src: 'cards/' + TAROT_BY_ID[c.id].file,
@@ -1089,13 +1109,12 @@ async function restoreRecord(rec) {
     })));
     for (let i = 0; i < 3; i++) scene.presetFlipped(i);
   } else {
-    layoutFallbackCards();
     for (let i = 0; i < 3; i++) setHitFace(i, true);
   }
 
+  // 直接进入滚筒（先看牌）；下滑才看那次的解读
   state = S.ROW;
   updateHits();
-  enterReading();
 }
 
 /* ============================================================
@@ -1255,7 +1274,6 @@ function init() {
     }
     if (el.deckHit) el.deckHit.hidden = false;
   } else {
-    scene.setDeckRaised(false);
     scene.openingShowDeck();
     if (el.glNotice) el.glNotice.hidden = true;
   }
