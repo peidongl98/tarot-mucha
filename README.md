@@ -84,24 +84,35 @@ npx serve .
 
 线上地址：<https://tarot-mucha.pages.dev>
 
-- 托管：Cloudflare Pages，项目名 `tarot-mucha`，生产方式为 **Direct Upload**
+- 托管：Cloudflare Pages，项目名 `tarot-mucha`
 - 代码仓库：<https://github.com/peidongl98/tarot-mucha>（`main` 分支）
 
-### 重新部署
+### 自动部署（已配置）
 
-仓库里 `pictrues/` 已被 `.gitignore` 排除，用 `git archive` 导出已跟踪文件后再上传，可保证只发布站点本身：
+**推送到 `main` 分支即自动上线**，无需手动操作。
+
+- 工作流：`.github/workflows/deploy.yml`，由 GitHub Actions 调用 `cloudflare/wrangler-action` 执行 `wrangler pages deploy`
+- 运行记录：<https://github.com/peidongl98/tarot-mucha/actions>
+- 也可在 Actions 页面点 **Run workflow** 手动触发
+- 凭证以仓库 Secret 形式保存（`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`），**不落任何文件**
+- `pictrues/` 已被 `.gitignore` 排除，Actions 里 checkout 出来就是待发布内容，因此不需要构建步骤，也不需要额外过滤
+
+> 说明：本账号未安装 Cloudflare Pages 的 GitHub App，所以用的是 **GitHub Actions + Direct Upload** 组合，效果等同于 CF 原生 Git 集成（推送即部署）。区别只在于部署由 GitHub 侧发起、构建日志在 GitHub Actions 里看。
+
+### 手动部署（备用）
 
 ```bash
-# 导出已跟踪文件到临时目录
+# 导出已跟踪文件到临时目录（自动排除 pictrues/）
 mkdir -p ../dist && git archive --format=tar HEAD | tar -x -C ../dist
 
 # 上传（需要 CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID 环境变量）
 npx wrangler pages deploy ../dist --project-name=tarot-mucha --branch=main
 ```
 
-> 注意：当前 Cloudflare 账号未安装 Cloudflare Pages 的 GitHub App，因此**无法用 API 建立 Git 自动部署**。如需「推送即自动部署」，有两种方式：
-> 1. 在 Cloudflare 后台手动安装一次 GitHub App 并把项目改为 Git 集成；
-> 2. 在仓库加一个 GitHub Actions 工作流，用 `cloudflare/wrangler-action` 在 push 时执行上面的部署命令（需要把 token 存为仓库 Secret）。
+### 若想改用 Cloudflare 原生 Git 集成
+
+需要先在 Cloudflare 后台安装一次 GitHub App：**Workers & Pages → Create → Pages → Connect to Git → 授权 GitHub → 选择 Only select repositories → 勾选 `tarot-mucha`**。
+注意：**现有的 Direct Upload 项目无法直接转为 Git 集成**，必须删掉 `tarot-mucha` 项目后重建（或换一个新项目名），改完后可删掉本仓库的 `deploy.yml`。
 
 ## 版权与声明
 
