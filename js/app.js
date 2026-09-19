@@ -652,6 +652,7 @@ async function startDraw() {
 
   wheel.a = 0;                                        // 过去居中开场
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
+  if (scene && scene.ok) scene.wheelApply(wheel.a);   // DEAL 期间 tickOverlay 不再同步，这里显式推一次
   setInputLocked(true);
   showStarHint(false);
   setAiRingVisible(true);
@@ -1114,6 +1115,7 @@ async function restoreRecord(rec) {
   if (state !== S.OPENING && state !== S.ASK) return;
   if (!rec || !rec.cards || rec.cards.length !== 3) return;
 
+  state = S.DEAL;          // 过渡态：动画期间挡住重复触发
   fromHistory = true;
   currentAt = rec.at;
   lastReading = rec.cards.map((c) => ({ id: c.id, reversed: !!c.reversed, position: c.position || '' }));
@@ -1136,6 +1138,7 @@ async function restoreRecord(rec) {
 
   wheel.a = 0;
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
+  if (scene && scene.ok) scene.wheelApply(wheel.a);
 
   // 问题 6：单张牌快速展开 → 旋转 → 淡出；同时那次的
   // 三张牌从牌背原位置飞出，落到滚筒槽位（三张已按记录翻开）
