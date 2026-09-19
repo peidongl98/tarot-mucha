@@ -907,11 +907,14 @@ async function askAi() {
 }
 
 /* ============================================================
- * 手势：上滑进解读 / 下滑回三张牌
+ * 滚轮 / 滑动
+ *   滚筒（三张牌）→ 滚轮任意方向都进入解读（宽容）；拖动 / 吸附中不触发
+ *   解读视图     → 只有向下滚才返回（文字区先滚文字，滚到顶再退）
+ *   其他状态     → 滚轮不触发任何切换
  * ============================================================ */
 
 function canAdvance() {
-  return state === S.ROW && cardsFlipped.every(Boolean);
+  return state === S.ROW && wheelResting();
 }
 
 function onWheel(e) {
@@ -944,7 +947,7 @@ function onTouchEnd(e) {
   touchStart = null;
   if (!isSwipe) return;
 
-  if (dy < 0 && canAdvance()) { enterReading(); return; }
+  if (dy < 0 && canAdvance()) { enterReading(); return; }   // 上滑：滚筒 → 解读（宽容，不要求全翻开）
   if (dy > 0 && state === S.READING) {
     if (start.inText && el.aiText.scrollTop > 2) return;   // 先把文字滚回顶部
     exitReading();
