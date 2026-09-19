@@ -546,11 +546,30 @@ export function createTarotScene(container) {
   scene.add(cardGroup);
 
   /* ---------- 布局 ---------- */
+  /* 顶部视图的三个槽位：每次重算，避免用到过期的相机矩阵 */
+  function computeTopSlots() {
+    const { w, h } = size();
+    const topH = Math.min(h * CONFIG.topHeightRatio, w * 0.30 * (CARD_H / CARD_W));
+    const topScale = topH / worldToPixels(CARD_H, 0);
+    const topSpread = topScale * 1.18;
+    const topC = screenToWorld(w / 2, h * CONFIG.topCenterY, 0, new THREE.Vector3());
+    topSlots = [
+      { x: topC.x - topSpread, y: topC.y, z: -0.30, rotY: 0.10, scale: topScale },
+      { x: topC.x, y: topC.y, z: 0, rotY: 0, scale: topScale },
+      { x: topC.x + topSpread, y: topC.y, z: 0.30, rotY: -0.10, scale: topScale },
+    ];
+  }
+
   function layout() {
     const { w, h } = size();
     renderer.setPixelRatio(dpr);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+    /* 先同步一次相机矩阵：下面的 screenToWorld / worldToPixels 依赖
+     * projectionMatrix 与 matrixWorldInverse，否则首次布局（还没渲染过）会算错 */
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
 
     const vFov = THREE.MathUtils.degToRad(CONFIG.fov);
     const tanHalf = Math.tan(vFov / 2);
@@ -577,15 +596,7 @@ export function createTarotScene(container) {
     ];
 
     /* 顶部视图：三张牌缩小贴顶（上滑进解读时用），下方留给光圈与解读文字 */
-    const topH = Math.min(h * CONFIG.topHeightRatio, w * 0.30 * (CARD_H / CARD_W));
-    const topScale = topH / worldToPixels(CARD_H, 0);
-    const topSpread = topScale * 1.18;
-    const topC = screenToWorld(w / 2, h * CONFIG.topCenterY, 0, new THREE.Vector3());
-    topSlots = [
-      { x: topC.x - topSpread, y: topC.y, z: -0.30, rotY: 0.10, scale: topScale },
-      { x: topC.x, y: topC.y, z: 0, rotY: 0, scale: topScale },
-      { x: topC.x + topSpread, y: topC.y, z: 0.30, rotY: -0.10, scale: topScale },
-    ];
+    computeTopSlots();
 
     current.forEach((c, i) => {
       if (!slots[i]) return;
@@ -1352,6 +1363,7 @@ export function createTarotScene(container) {
   api.setView = function (mode) {
     const gsap = window.gsap;
     if (!current.length) { readingView = mode; return null; }
+    if (mode === 'top') computeTopSlots();      // 用当前视口重算，保证贴顶
     const set = mode === 'top' ? topSlots : slots;
     stopRowFloat();
     if (!gsap) {
