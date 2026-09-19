@@ -834,23 +834,37 @@ function clearAiText() {
  * 再按语言归类 —— 含 ≥2 个 CJK 字符的段归中文，其余归英文。
  * 旧记录是纯中文，走同一路径（英文组为空 → 只显示中文）。 */
 function splitReading(text) {
+  const NOTE_EN = 'For entertainment reference only.';
+  const NOTE_CN = '以上解读仅供娱乐参考';
   const blocks = String(text)
     .split(/\r?\n\s*\r?\n/)                       // 空行 = 段落边界
     .map((b) => {
-      const joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      if (!joined.length) return '';
-      return joined.join(' ');                      // 段内软换行以空格相连（含中英双免责相邻行）
+      const joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ').trim();
+      if (!joined) return null;
+      // 免责句可能在块尾（与正文同一块）或自己就是一块 —— 从块尾摘出
+      if (joined.endsWith(NOTE_EN)) {
+        return { text: joined.slice(0, joined.length - NOTE_EN.length).trim(), note: NOTE_EN };
+      }
+      if (joined.endsWith(NOTE_CN)) {
+        return { text: joined.slice(0, joined.length - NOTE_CN.length).trim(), note: NOTE_CN };
+      }
+      return { text: joined, note: '' };
     })
     .filter(Boolean);
+
   const enRaw = [];
   const cn = [];
   let enNote = '';
   let cnNote = '';
   blocks.forEach((p) => {
-    if (!enNote && /for entertainment/i.test(p)) { enNote = p; return; }   // 免责先摘出，不参与正文配对
-    if (!cnNote && /仅供娱乐参考/.test(p)) { cnNote = p; return; }
-    const cjk = (p.match(/[\u4e00-\u9fff]/g) || []).length;
-    (cjk >= 2 ? cn : enRaw).push(p);
+    if (p.note) {
+      if (/entertainment/i.test(p.note)) { if (!enNote) enNote = p.note; }
+      else if (!cnNote) cnNote = p.note;
+      if (!p.text) return;                        // 免责单独成块：正文跳过
+    }
+    if (!p.text) return;
+    const cjk = (p.text.match(/[\u4e00-\u9fff]/g) || []).length;
+    (cjk >= 2 ? cn : enRaw).push(p.text);
   });
 
   /* 兜底归并：模型偶发把英文段按空行多拆一倍。
