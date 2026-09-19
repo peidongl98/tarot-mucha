@@ -654,6 +654,8 @@ async function startDraw() {
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   setInputLocked(true);
   showStarHint(false);
+  setAiRingVisible(true);
+  setAiThinking(false);
 
   const cards = drawThree();
   lastReading = cards;
@@ -776,8 +778,8 @@ function enterReading() {
   if (scene && scene.ok) scene.setView('top');
   el.readingView.classList.add('is-on');
   el.returnOrb.classList.add('is-on');
-  if (lastAiText) showAiText(lastAiText, true);
-  else clearAiText();
+  if (lastAiText) showAiText(lastAiText, true);      // 历史回看 / 已解读过：直接显示，光圈隐去
+  else { clearAiText(); setAiRingVisible(true); }     // 未解读：光圈亮起等待点击
   updateHits();
 }
 
@@ -796,12 +798,18 @@ function setAiThinking(on) {
   el.aiRing.classList.toggle('is-thinking', !!on);
 }
 
+function setAiRingVisible(on) {
+  if (!el.aiRing) return;
+  el.aiRing.classList.toggle('is-off', !on);
+}
+
 function clearAiText() {
   el.aiText.textContent = '';
   el.aiText.classList.remove('is-on');
 }
 
-/* 解读文字：从光圈位置浮出 + 一次涟漪扩散 + 段落逐段浮现 */
+/* 解读文字：从光圈位置浮出 + 一次涟漪扩散 + 段落逐段浮现；
+ * 浮现完成后光圈淡出隐去（问题 2）。 */
 function showAiText(text, instant) {
   el.aiText.textContent = '';
   const paras = String(text).split(/\n+/).map((s) => s.trim()).filter(Boolean);
@@ -814,29 +822,35 @@ function showAiText(text, instant) {
   const gsap = window.gsap;
   const ps = Array.prototype.slice.call(el.aiText.querySelectorAll('p'));
 
-  if (!instant && !REDUCED) {
-    const rip = elNew('span', 'ai-ripple');
-    el.readingView.appendChild(rip);
-    void rip.offsetWidth;
-    rip.classList.add('is-on');
-    window.setTimeout(() => rip.remove(), 2800);
+  if (instant || REDUCED || !gsap || !ps.length) {
+    setAiRingVisible(false);
+    return;
   }
-  if (gsap && !REDUCED && ps.length) {
-    gsap.fromTo(ps,
-      { opacity: 0, y: 12 },
-      { opacity: 1, y: 0, duration: 0.9, stagger: instant ? 0 : 0.42, ease: 'power2.out', delay: instant ? 0 : 0.2 });
-  }
+  const rip = elNew('span', 'ai-ripple');
+  el.readingView.appendChild(rip);
+  void rip.offsetWidth;
+  rip.classList.add('is-on');
+  window.setTimeout(() => rip.remove(), 2800);
+  gsap.fromTo(ps,
+    { opacity: 0, y: 12 },
+    { opacity: 1, y: 0, duration: 0.9, stagger: 0.42, ease: 'power2.out', delay: 0.2 });
+  const totalMs = (0.2 + 0.42 * (ps.length - 1) + 0.9 + 0.4) * 1000;
+  window.setTimeout(() => {
+    if (!aiBusy) setAiRingVisible(false);   // 期间若重新发起解读，不抢状态
+  }, totalMs);
 }
 
 function showAiError(msg) {
   el.aiText.textContent = '';
   el.aiText.appendChild(elNew('p', 'ai-error', msg));
   el.aiText.classList.add('is-on');
+  setAiRingVisible(true);   // 出错时光圈留在原地，作为重试入口
 }
 
 async function askAi() {
   if (aiBusy || !lastReading) return;
   aiBusy = true;
+  setAiRingVisible(true);
   setAiThinking(true);
   el.aiText.textContent = '';
   el.aiText.classList.add('is-on');
@@ -1035,6 +1049,7 @@ async function resetOpening(opts) {
 
   if (scene && scene.ok) scene.resetReading();
   clearAiText();
+  setAiRingVisible(true);
   setAiThinking(false);
   el.readingView.classList.remove('is-on');
   el.returnOrb.classList.remove('is-on');
