@@ -2,10 +2,11 @@
 
 在线塔罗抽牌站：**过去 / 现在 / 未来** 三张牌，内置 78 张公版牌义，可选 AI 深度解读，无需登录。
 
-- 3D 沉浸式牌阵（Three.js 单场景三层）+ 奢侈品式配色
+- 3D 沉浸式牌阵（Three.js 单场景三层）+ 输入框粒子雾 + 奢侈品式配色
+- 花体英文标题（Cinzel Decorative），页面上不放任何说明性文字
 - 零构建、不引入框架；Three.js / GSAP / 字体走 CDN，牌面与数据本地打包
 - AI 解读走 Cloudflare Pages Function，Key 只从环境变量读取
-- 抽牌记录存在浏览器 `localStorage`，不上传任何数据
+- **不存储任何用户数据**：无 localStorage、无历史记录，抽牌与提问都不落盘
 - 纯娱乐用途
 
 线上地址：<https://tarot-mucha.pages.dev>
@@ -54,6 +55,7 @@ npx wrangler pages dev . --port 8788 --binding GLM_API_KEY=你的key
 | Layer 3（最远） | 粒子星云 | `THREE.Points` + 自定义 `ShaderMaterial`，默认 **30000** 粒子；顶点着色器内做三轴错频漂移 + 呼吸，片元用软圆点 + Additive 混合；另有一层少量大尺寸柔光团营造星云感 |
 | Layer 2（中间） | 仪式舞台 | 地面柔光盘（canvas 生成的径向渐变贴图）+ 两圈极淡金环，锚定"仪式空间" |
 | Layer 1（最近） | 3D 卡牌 | 牌体 `BoxGeometry` 有厚度 + 正/背两张平面贴图（背图绕 Y 轴 180° 避免镜像）+ `EdgesGeometry` 细金描边 |
+| 附着层 | 输入框粒子雾 | 与卡牌同一个场景；app.js 每帧把输入框的屏幕矩形传给场景，场景用视线与 `z = CONFIG.mistZ` 平面求交得到世界坐标，整团粒子随之平移，因此滚动、横竖屏、移动端键盘弹起都能跟住。约六成粒子走外圈光环、四成是框内极淡薄雾，文字区域保持干净 |
 
 - 光影：环境光 + 一盏主光 + 一盏金色轮廓光 + 一点暖色补光；`ACESFilmicToneMapping`
 - 纵深：三张牌 z 轴错开（过去稍远 / 现在居中 / 未来稍近），透视自然产生大小差
@@ -68,10 +70,14 @@ npx wrangler pages dev . --port 8788 --binding GLM_API_KEY=你的key
 ```js
 export const CONFIG = {
   enable3D: true,          // 总开关
-  particleCount: 30000,    // 粒子数
+  particleCount: 30000,    // 星云粒子数
   nebulaCount: 70,
+  mistCount: 1100,         // 输入框雾气粒子数（性能吃紧时可降）
+  mistOpacity: 0.85,       // 雾气强度
+  mistZ: -0.35,            // 雾气所在平面
   dprMax: 2,
   enableNebula: true,
+  enableMist: true,
   autoDegrade: false,      // 按需求：不做性能自动降级
   fov: 42,
   cardDepth: 0.03,
@@ -94,7 +100,12 @@ export const DEGRADE_PROFILES = { high: {...}, medium: {...}, low: {...} };
 | 边框 | `rgba(201,169,97,0.2)` / `rgba(237,232,224,0.08)` |
 | 面板 | `rgba(18,16,14,0.88)` + `backdrop-filter: blur(9px)` |
 
-全部以 CSS 变量定义在 `:root`。标题字体 `Cormorant Garamond`（Google Fonts CDN），中文与正文走系统栈。section 间距 104px（窄屏 76px）。
+全部以 CSS 变量定义在 `:root`。
+- 标题：`Cinzel Decorative`（花体英文，Google Fonts CDN），两行 `MUCHA / TAROT`，`background-clip: text` 上金色渐变
+- 其余拉丁字形：`Cormorant Garamond`
+- 中文与正文：系统栈
+
+section 间距 104px（窄屏 76px）。**页面上不出现任何说明性文字**，只保留标题、输入框 placeholder、占卜提示句、按钮文字、牌义与 AI 结果。
 
 ## 动效清单
 
@@ -105,7 +116,7 @@ export const DEGRADE_PROFILES = { high: {...}, medium: {...}, low: {...} };
 | 3 | 牌义：翻牌后逐段淡入 | GSAP（滚动触发） |
 | 4 | 结果区进入视口触发 | `ScrollTrigger` |
 | 5 | 按钮 hover：金色微光流动 | CSS `::after` 渐变扫过 |
-| 6 | 抽牌按钮：呼吸光晕 | CSS `@keyframes breathe` |
+| 6 | 抽牌按钮：水晶球式呼吸光晕 | CSS `@keyframes orbBreathe`（7.2s，外层光晕胀缩 + 内层透光，四层 `box-shadow` 结构一致才能平滑插值） |
 
 未做（按需求）：滚动劫持、音效、粒子爆炸、镜头剧烈运动。
 
@@ -162,7 +173,8 @@ npx wrangler pages secret put GLM_API_KEY --project-name=tarot-mucha
 | 抽牌 | 取前 3 张 → 过去 / 现在 / 未来，天然不重复 |
 | 正逆位 | 每张独立 50% 概率，优先用 `crypto.getRandomValues`（拒绝采样避免偏差） |
 | 逆位展示 | 3D 模式下牌体绕 Z 轴旋转 180°；降级模式下图 `rotate(180deg)` |
-| 历史 | `localStorage` 键名 `tarot_history`，最多 30 条，点条目可回看该次结果 |
+| 提问 | 在首屏输入，抽牌后带上问题；AI 面板回显将被使用的问题；可以为空 |
+| 数据存储 | **无**。启动时会清掉早期版本遗留的 `tarot_history` 键 |
 
 ## 数据格式
 
@@ -231,4 +243,5 @@ npx wrangler pages deploy ../dist --project-name=tarot-mucha --branch=main
 
 - **批次 A（已完成）**：抽牌 + 牌义 + 历史 + 部署
 - **批次 B（已完成）**：3D 沉浸式视觉（粒子星云 / 仪式舞台 / 3D 卡牌）+ AI 解读
+- **批次 C（已完成）**：提问前移、输入框粒子雾、花体英文标题、去掉说明性文字、移除 localStorage 历史
 - 未做：音效、牌阵扩展、PR 预览部署

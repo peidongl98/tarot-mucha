@@ -24,10 +24,14 @@ import * as THREE from 'three';
  * ============================================================ */
 export const CONFIG = {
   enable3D: true,          // 总开关，false 则走 DOM 降级路径
-  particleCount: 30000,    // 粒子数（需求默认值）
+  particleCount: 30000,    // 星云粒子数（需求默认值）
   nebulaCount: 70,         // 星云柔光团数量
+  mistCount: 1100,         // 输入框雾气粒子数（克制，可再降）
+  mistOpacity: 0.85,       // 雾气整体强度
+  mistZ: -0.35,            // 雾气所在平面（略在卡牌之后，避免抢戏）
   dprMax: 2,               // 设备像素比上限
   enableNebula: true,
+  enableMist: true,
   enableFog: true,
   autoDegrade: false,      // 明确关闭：不做性能自动降级
   fov: 42,
@@ -37,9 +41,9 @@ export const CONFIG = {
 
 /* 降级档位建议值（供以后启用 autoDegrade 时使用，当前不自动应用） */
 export const DEGRADE_PROFILES = {
-  high: { particleCount: 30000, dprMax: 2, enableNebula: true },
-  medium: { particleCount: 14000, dprMax: 1.5, enableNebula: true },
-  low: { particleCount: 6000, dprMax: 1, enableNebula: false },
+  high: { particleCount: 30000, mistCount: 1100, dprMax: 2, enableNebula: true },
+  medium: { particleCount: 14000, mistCount: 500, dprMax: 1.5, enableNebula: true },
+  low: { particleCount: 6000, mistCount: 0, dprMax: 1, enableNebula: false },
 };
 
 const CARD_W = 1;
@@ -86,6 +90,7 @@ const PARTICLE_VERT = /* glsl */ `
   uniform float uTime;
   uniform float uPixelRatio;
   uniform float uSize;
+  uniform float uDrift;     // 漂移幅度倍率：星云用 1，输入框雾气用很小的值
   varying vec3 vTint;
   varying float vAlpha;
 
@@ -95,9 +100,9 @@ const PARTICLE_VERT = /* glsl */ `
     // 缓慢流动：三轴用不同频率/相位，避免看出规律
     vec3 p = position;
     float t = uTime * 0.055;
-    p.x += sin(t + aPhase) * 0.62;
-    p.y += cos(t * 0.82 + aPhase * 1.31) * 0.55;
-    p.z += sin(t * 0.63 + aPhase * 0.71) * 0.42;
+    p.x += sin(t + aPhase) * 0.62 * uDrift;
+    p.y += cos(t * 0.82 + aPhase * 1.31) * 0.55 * uDrift;
+    p.z += sin(t * 0.63 + aPhase * 0.71) * 0.42 * uDrift;
 
     // 呼吸感
     float breathe = 0.66 + 0.34 * sin(uTime * 0.42 + aPhase * 2.1);
@@ -117,13 +122,14 @@ const PARTICLE_VERT = /* glsl */ `
 
 const PARTICLE_FRAG = /* glsl */ `
   uniform float uOpacity;
+  uniform float uSoft;     // 软圆点衰减宽度：星云用小值（点状），雾气用大值（柔霭状）
   varying vec3 vTint;
   varying float vAlpha;
 
   void main() {
     vec2 c = gl_PointCoord - 0.5;
     float d = length(c);
-    float core = smoothstep(0.5, 0.04, d);
+    float core = smoothstep(0.5, uSoft, d);
     float glow = pow(core, 3.2);
     float a = (core * 0.32 + glow * 0.9) * vAlpha * uOpacity;
     if (a < 0.004) discard;
@@ -131,13 +137,15 @@ const PARTICLE_FRAG = /* glsl */ `
   }
 `;
 
-function makeParticleMaterial(uSize, uOpacity) {
+function makeParticleMaterial(uSize, uOpacity, uDrift, uSoft) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
       uPixelRatio: { value: 1 },
       uSize: { value: uSize },
       uOpacity: { value: uOpacity },
+      uDrift: { value: uDrift == null ? 1 : uDrift },
+      uSoft: { value: uSoft == null ? 0.04 : uSoft },
     },
     vertexShader: PARTICLE_VERT,
     fragmentShader: PARTICLE_FRAG,
@@ -183,6 +191,52 @@ function makeParticleGeometry(count, spread) {
     // 金色占比低一些，整体保持雅致
     tmp.copy(Math.random() < 0.22 ? champagne : ivory);
     tmp.multiplyScalar(0.72 + Math.random() * 0.28);
+    tint[i3] = tmp.r; tint[i3 + 1] = tmp.g; tint[i3 + 2] = tmp.b;
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aScale', new THREE.BufferAttribute(scale, 1));
+  g.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  g.setAttribute('aTint', new THREE.BufferAttribute(tint, 3));
+  return g;
+}
+
+/* 输入框雾气：局部归一化空间（[-1,1] 的扁椭圆），实际尺寸由 group.scale 决定。
+ * 约六成粒子走外圈光环（贴着输入框边缘之外），四成是框内极淡的薄雾，
+ * 这样文字区域依然干净，可读性不受影响。 */
+function makeMistGeometry(count) {
+  const pos = new Float32Array(count * 3);
+  const scale = new Float32Array(count);
+  const phase = new Float32Array(count);
+  const tint = new Float32Array(count * 3);
+
+  const ivory = new THREE.Color(0xe8e2d6);
+  const champagne = new THREE.Color(0xc9a961);
+  const tmp = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    const i3 = i * 3;
+    const halo = i % 5 < 3;
+
+    if (halo) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 0.92 + Math.random() * 0.34;
+      pos[i3] = Math.cos(a) * rr;
+      pos[i3 + 1] = Math.sin(a) * rr * 0.85;
+      pos[i3 + 2] = (Math.random() - 0.5) * 1.2;
+      scale[i] = 0.55 + Math.pow(Math.random(), 1.8) * 0.85;
+    } else {
+      pos[i3] = (Math.random() * 2 - 1) * 0.92;
+      pos[i3 + 1] = (Math.random() * 2 - 1) * 0.8;
+      pos[i3 + 2] = (Math.random() - 0.5) * 0.9;
+      scale[i] = 0.22 + Math.random() * 0.34;
+    }
+
+    phase[i] = Math.random() * Math.PI * 2;
+
+    tmp.copy(Math.random() < 0.3 ? champagne : ivory);
+    tmp.multiplyScalar(halo ? 0.68 + Math.random() * 0.32 : 0.4 + Math.random() * 0.3);
     tint[i3] = tmp.r; tint[i3 + 1] = tmp.g; tint[i3 + 2] = tmp.b;
   }
 
@@ -313,6 +367,7 @@ export function createTarotScene(container) {
     setScrollProgress: () => {},
     projectSlot: () => null,
     cardBottomY: () => null,
+    updateMist: () => {},
     resize: () => {},
     dispose: () => {},
   };
@@ -371,10 +426,26 @@ export function createTarotScene(container) {
   if (CONFIG.enableNebula) {
     nebula = new THREE.Points(
       makeParticleGeometry(CONFIG.nebulaCount, 26),
-      makeParticleMaterial(30, 0.062)
+      makeParticleMaterial(30, 0.062, 1)
     );
     nebula.frustumCulled = false;
     scene.add(nebula);
+  }
+
+  /* ---------- 输入框雾气（跟随 DOM 元素，只在首屏出现） ---------- */
+  let mist = null;
+  let mistRect = null;      // 由 app.js 每帧传入的屏幕像素矩形
+  let mistTarget = 0;       // 目标不透明度
+  let mistAlpha = 0;        // 平滑后的实际不透明度
+
+  if (CONFIG.enableMist && CONFIG.mistCount > 0) {
+    mist = new THREE.Points(
+      makeMistGeometry(CONFIG.mistCount),
+      makeParticleMaterial(2.4, 0, 0.045, 0.32)
+    );
+    mist.frustumCulled = false;
+    mist.visible = false;
+    scene.add(mist);
   }
 
   /* ---------- Layer 2：仪式舞台 ---------- */
@@ -489,6 +560,43 @@ export function createTarotScene(container) {
     return project(slots[i], -(CARD_H * cardScale) / 2 - 0.11).y;
   };
 
+  /* ---------- 屏幕像素 → 世界坐标（雾气定位用） ---------- */
+  const rayVec = new THREE.Vector3();
+
+  // 屏幕像素点 (cx, cy) 在指定 z 平面上对应的世界坐标
+  function screenToWorld(cx, cy, planeZ, out) {
+    const { w, h } = size();
+    rayVec.set((cx / w) * 2 - 1, -((cy / h) * 2 - 1), 0.5).unproject(camera);
+    rayVec.sub(camera.position).normalize();
+    const t = (planeZ - camera.position.z) / rayVec.z;
+    return out.copy(camera.position).addScaledVector(rayVec, t);
+  }
+
+  // 指定 z 平面上，N 个屏幕像素对应多少世界单位
+  function pixelsToWorld(px, planeZ) {
+    const { w } = size();
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(CONFIG.fov) / 2);
+    const dist = Math.max(0.1, camera.position.z - planeZ);
+    return (px / w) * (2 * tanHalf * dist * camera.aspect);
+  }
+
+  /* app.js 每帧传入输入框的屏幕矩形与可见度，这里只做数值缓存，不读 DOM */
+  api.updateMist = function (rect, visible) {
+    if (!mist) return;
+    if (!rect || !(visible > 0)) {
+      mistRect = null;
+      mistTarget = 0;
+      return;
+    }
+    mistRect = {
+      cx: rect.left + rect.width / 2,
+      cy: rect.top + rect.height / 2,
+      w: rect.width,
+      h: rect.height,
+    };
+    mistTarget = Math.min(1, Math.max(0, visible));
+  };
+
   /* ---------- 渲染循环 ---------- */
   const camState = { z: 5.2, y: 0.35, lookY: 0 };
 
@@ -520,6 +628,23 @@ export function createTarotScene(container) {
     camera.lookAt(0, camState.lookY, 0);
 
     stageGroup.position.y = Math.sin(t * 0.5) * 0.03;
+
+    /* 输入框雾气：跟随 DOM 位置，淡入淡出由可见度驱动 */
+    if (mist) {
+      mistAlpha += (mistTarget - mistAlpha) * 0.085;
+      if (mistAlpha < 0.004 && mistTarget === 0) {
+        mist.visible = false;
+      } else if (mistRect) {
+        mist.visible = true;
+        screenToWorld(mistRect.cx, mistRect.cy, CONFIG.mistZ, mist.position);
+        const halfW = pixelsToWorld(mistRect.w * 0.60, CONFIG.mistZ);
+        const halfH = pixelsToWorld(mistRect.h * 1.55, CONFIG.mistZ);
+        mist.scale.set(halfW, halfH, 0.35);
+        mist.material.uniforms.uOpacity.value = mistAlpha * CONFIG.mistOpacity;
+        mist.material.uniforms.uTime.value = t;
+        mist.material.uniforms.uPixelRatio.value = dpr;
+      }
+    }
 
     renderer.render(scene, camera);
   }

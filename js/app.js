@@ -1,4 +1,4 @@
-/* js/app.js — 穆夏塔罗 · 主逻辑（3D 重做 + AI 解读）
+/* js/app.js — Mucha Tarot · 主逻辑
  *
  * 依赖：
  *   js/data.js       -> TAROT_CARDS / TAROT_BY_ID（全局，经典脚本）
@@ -6,18 +6,23 @@
  *   js/scene.js      -> createTarotScene（ES module）
  *   window.gsap / window.ScrollTrigger（CDN，UMD 全局）
  *
+ * 流程：标题 + 提问 + 抽牌按钮 → 抽牌 → 三张牌与牌义 → AI 解读（沿用首屏问题）
+ *
+ * 不存储任何用户数据：没有 localStorage、没有历史记录、抽牌与提问都不落盘。
+ *
  * 双路径：
- *   WebGL 可用   → 3D 卡牌；牌义面板只出文字
- *   WebGL 不可用 → body.no-3d，牌义面板补上牌面小图，抽牌/牌义/历史/AI 全部照常
+ *   WebGL 可用   → 3D 卡牌 + 输入框粒子雾；牌义面板只出文字
+ *   WebGL 不可用 → body.no-3d，牌义面板补上牌面小图，其余功能照常
  */
 
 import { createTarotScene } from './scene.js';
 
-const STORAGE_KEY = 'tarot_history';
-const HISTORY_LIMIT = 30;
 const MAX_QUESTION_LEN = 200;
 const POSITIONS = ['过去', '现在', '未来'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+/* 早期版本用 localStorage 存抽牌历史，该功能已移除；顺手清掉遗留键，避免浏览器里残留抽牌数据 */
+const LEGACY_STORAGE_KEY = 'tarot_history';
 
 const el = {};
 let scene = null;
@@ -54,46 +59,6 @@ function drawThree() {
 }
 
 /* ============================================================
- * 历史（localStorage）
- * ============================================================ */
-
-function loadHistory() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data)) return [];
-    return data.filter((r) => r && typeof r.time === 'number' && Array.isArray(r.cards)
-      && r.cards.length === 3
-      && r.cards.every((c) => c && TAROT_BY_ID[c.id]));
-  } catch (e) {
-    return [];
-  }
-}
-
-let storageWarned = false;
-
-function saveHistory(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, HISTORY_LIMIT)));
-    return true;
-  } catch (e) {
-    if (!storageWarned) {
-      storageWarned = true;
-      if (el.drawHint) el.drawHint.textContent = '本次记录无法保存（浏览器可能禁用了本地存储）';
-    }
-    return false;
-  }
-}
-
-function addHistory(cards) {
-  const list = loadHistory();
-  list.unshift({ time: Date.now(), cards });
-  saveHistory(list);
-  return list;
-}
-
-/* ============================================================
  * 渲染
  * ============================================================ */
 
@@ -102,12 +67,6 @@ function elNew(tag, cls, text) {
   if (cls) n.className = cls;
   if (text != null) n.textContent = text;
   return n;
-}
-
-function formatTime(ts) {
-  const d = new Date(ts);
-  const p = (n) => (n < 10 ? '0' + n : '' + n);
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function renderReading(cards) {
@@ -124,7 +83,7 @@ function renderReading(cards) {
     box.appendChild(elNew('p', 'read-en', `${meta.en} · ${meta.suitCn}`));
     box.appendChild(elNew('span', 'read-badge' + (rev ? ' is-rev' : ''), rev ? '逆位' : '正位'));
 
-    // 只在降级模式（body.no-3d）下由 CSS 显示
+    // 只在降级模式（body.no-3d）与窄屏下由 CSS 显示
     const thumb = document.createElement('img');
     thumb.className = 'read-thumb';
     thumb.src = 'cards/' + meta.file;
@@ -143,29 +102,6 @@ function renderReading(cards) {
   });
 }
 
-function renderHistory(list) {
-  el.historyList.textContent = '';
-  if (!list.length) {
-    el.historyList.appendChild(elNew('p', 'history-empty', '暂无记录'));
-    return;
-  }
-  list.forEach((rec) => {
-    const btn = elNew('button', 'history-item');
-    btn.type = 'button';
-    btn.appendChild(elNew('span', 'history-time', formatTime(rec.time)));
-    const line = elNew('span', 'history-cards');
-    rec.cards.forEach((c, i) => {
-      const meta = TAROT_BY_ID[c.id];
-      if (i > 0) line.appendChild(elNew('em', null, '／'));
-      line.appendChild(document.createTextNode(meta ? meta.name : c.id));
-      line.appendChild(elNew('em', null, c.reversed ? '逆' : '正'));
-    });
-    btn.appendChild(line);
-    btn.addEventListener('click', () => showReading(rec.cards, { record: false, scroll: true }));
-    el.historyList.appendChild(btn);
-  });
-}
-
 /* fixed 浮层上的三个牌位标签 */
 function fillSlotLabels(cards) {
   cards.forEach((c, i) => {
@@ -181,7 +117,7 @@ function fillSlotLabels(cards) {
  * GSAP 编排
  * ============================================================ */
 
-/* 1) 首屏：标题 → 副标题 → 抽牌按钮，依次淡入上移 */
+/* 1) 首屏：标题 → 输入框 → 抽牌按钮，依次淡入上移 */
 function introHero() {
   if (!window.gsap || REDUCED) return;
   window.gsap.timeline({ defaults: { ease: 'power3.out' } })
@@ -208,7 +144,7 @@ function revealStageLabels() {
   }
 }
 
-/* 4) 结果区进入视口触发逐段淡入 */
+/* 结果区进入视口触发逐段淡入 */
 function armReadingReveal() {
   if (readingTrigger) { readingTrigger.kill(); readingTrigger = null; }
   if (!window.gsap || !window.ScrollTrigger) return;
@@ -254,19 +190,45 @@ function armCameraScroll() {
 }
 
 /* ============================================================
- * 牌位标签跟随 3D 投影（每帧更新，滚动时也保持对齐）
+ * 每帧：读 DOM → 更新 3D 雾气 → 写牌位标签
+ * 先读后写，避免读写交错引起布局抖动；scene 内部不再读 DOM。
  * ============================================================ */
 
-function tickLabels() {
-  requestAnimationFrame(tickLabels);
+function tickOverlay() {
+  requestAnimationFrame(tickOverlay);
   if (!scene || !scene.ok) return;
-  if (!document.body.classList.contains('has-draw')) return;
 
-  const overlay = el.stageOverlay;
   const h = window.innerHeight;
-  const r = el.stage.getBoundingClientRect();
-  const visible = r.top <= h * 0.28 && r.bottom >= h * 0.72;
-  overlay.style.opacity = visible ? '1' : '0';
+
+  /* ---- 读：输入框矩形（用于雾气跟随） ---- */
+  let qRect = null;
+  let qVis = 0;
+  if (el.question) {
+    const q = el.question.getBoundingClientRect();
+    if (q.bottom > 0 && q.top < h) {
+      const fadeIn = Math.min(1, Math.max(0, (h - q.top) / 140));
+      const fadeOut = Math.min(1, Math.max(0, q.bottom / 140));
+      const focused = document.activeElement === el.question;
+      qVis = Math.min(fadeIn, fadeOut) * (focused ? 1 : 0.78);
+    }
+    qRect = q;
+  }
+
+  /* ---- 读：舞台矩形（用于牌位标签显隐） ---- */
+  let stageRect = null;
+  if (document.body.classList.contains('has-draw')) {
+    stageRect = el.stage.getBoundingClientRect();
+  }
+
+  /* ---- 写 ---- */
+  scene.updateMist(qRect, qVis);
+
+  if (!stageRect) {
+    el.stageOverlay.style.opacity = '0';
+    return;
+  }
+  const visible = stageRect.top <= h * 0.28 && stageRect.bottom >= h * 0.72;
+  el.stageOverlay.style.opacity = visible ? '1' : '0';
   if (!visible) return;
 
   for (let i = 0; i < 3; i++) {
@@ -284,19 +246,15 @@ function tickLabels() {
  * ============================================================ */
 
 function showReading(cards, opts) {
-  const o = Object.assign({ record: true, scroll: true }, opts || {});
+  const o = Object.assign({ scroll: true }, opts || {});
   lastReading = cards;
 
   renderReading(cards);
   fillSlotLabels(cards);
 
-  if (o.record) renderHistory(addHistory(cards));
-  else renderHistory(loadHistory());
-
   document.body.classList.add('has-draw');
   armReadingReveal();
   armSimpleReveal('.ai-card', '#aiSection');
-  armSimpleReveal('.history-item', '#history');
   updateAiButton();
   syncQuestionEcho();
 
@@ -306,7 +264,7 @@ function showReading(cards, opts) {
     });
   }
 
-  /* 2) 抽牌：从空间深处浮现 → 飞向三位 → 依次 3D 翻转（由 scene 内部 GSAP 编排） */
+  /* 抽牌：从空间深处浮现 → 飞向三位 → 依次 3D 翻转（由 scene 内部 GSAP 编排） */
   if (scene && scene.ok) {
     scene.reveal(
       cards.map((c) => ({ src: 'cards/' + TAROT_BY_ID[c.id].file, reversed: !!c.reversed })),
@@ -327,16 +285,9 @@ function onDraw() {
   if (el.drawBtn.disabled) return;
   setDrawBusy(true);
   const cards = drawThree();
-  showReading(cards, { record: true, scroll: true });
+  showReading(cards, { scroll: true });
   // 首轮要加载贴图，稍晚一点恢复按钮
   setTimeout(() => setDrawBusy(false), scene && scene.ok ? 900 : 120);
-}
-
-function onClear() {
-  if (!loadHistory().length) return;
-  if (!window.confirm('确定清空全部抽牌记录？此操作无法撤销。')) return;
-  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* 忽略 */ }
-  renderHistory([]);
 }
 
 /* ============================================================
@@ -348,17 +299,17 @@ function updateAiButton() {
   el.aiBtn.disabled = aiBusy || !lastReading;
 }
 
-/* 提问前移后：问题只在首屏采集，这里统一读取 */
+/* 提问只在首屏采集，这里统一读取 */
 function currentQuestion() {
   return el.question ? (el.question.value || '').trim().slice(0, MAX_QUESTION_LEN) : '';
 }
 
-/* 把将被使用的问题回显到 AI 面板（解读者与用户看到的是同一个问题） */
+/* 把将被使用的问题回显到 AI 面板；没填就不显示这一行 */
 function syncQuestionEcho() {
-  if (!el.aiQuestionEcho) return;
+  if (!el.aiQuestion || !el.aiQuestionEcho) return;
   const q = currentQuestion();
-  el.aiQuestionEcho.textContent = q || '（未填写，将给出整体解读）';
-  el.aiQuestionEcho.classList.toggle('is-empty', !q);
+  el.aiQuestionEcho.textContent = q ? `「${q}」` : '';
+  el.aiQuestion.hidden = !q;
 }
 
 /* 加载状态：呼吸光晕（CSS），不用转圈 */
@@ -488,18 +439,19 @@ function cacheDom() {
   el.drawBtn2 = document.getElementById('drawBtn2');
   el.drawHint = document.getElementById('drawHint');
   el.readingGrid = document.getElementById('readingGrid');
-  el.historyList = document.getElementById('historyList');
-  el.clearBtn = document.getElementById('clearBtn');
   el.aiCard = document.querySelector('.ai-card');
   el.aiBtn = document.getElementById('aiBtn');
+  el.aiQuestion = document.querySelector('.ai-question');
   el.aiQuestionEcho = document.getElementById('aiQuestionEcho');
   el.aiOut = document.getElementById('aiOut');
   el.question = document.getElementById('question');
-  el.questionCount = document.getElementById('questionCount');
 }
 
 function init() {
   cacheDom();
+
+  // 清掉历史功能遗留的本地数据（该功能已移除，不再存储任何用户抽牌记录）
+  try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch (e) { /* 隐私模式下可能不可用 */ }
 
   if (typeof TAROT_CARDS === 'undefined' || TAROT_CARDS.length !== 78) {
     if (el.drawHint) el.drawHint.textContent = '牌面数据加载失败，请刷新页面';
@@ -519,7 +471,7 @@ function init() {
         scene.reason === 'no-webgl' ? '你的浏览器暂不支持 3D 渲染' : '3D 场景未能启动';
       el.glNotice.querySelector('.gl-notice-text').textContent =
         scene.reason === 'no-webgl'
-          ? '页面已切换为简洁模式，抽牌、牌义、历史与 AI 解读都完全正常。'
+          ? '页面已切换为简洁模式，抽牌、牌义与 AI 解读都完全正常。'
           : '页面已切换为简洁模式，功能不受影响。';
     }
   }
@@ -528,26 +480,28 @@ function init() {
   window.addEventListener('orientationchange', () => {
     setTimeout(() => { if (scene && scene.ok) scene.resize(); }, 240);
   });
+  // 移动端键盘弹出会改变可视视口，需要重新布局 3D 并立刻校正雾气位置
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      if (scene && scene.ok) scene.resize();
+      tickOverlay();
+    });
+  }
 
   /* ---- 事件 ---- */
   el.drawBtn.addEventListener('click', onDraw);
   if (el.drawBtn2) el.drawBtn2.addEventListener('click', onDraw);
-  el.clearBtn.addEventListener('click', onClear);
   el.aiBtn.addEventListener('click', askAi);
-  el.question.addEventListener('input', () => {
-    el.questionCount.textContent = `${el.question.value.length} / ${MAX_QUESTION_LEN}`;
-    syncQuestionEcho();
-  });
+  el.question.addEventListener('input', syncQuestionEcho);
   el.question.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') askAi();
   });
 
-  /* ---- 首屏与历史 ---- */
+  /* ---- 首屏 ---- */
   introHero();
-  renderHistory(loadHistory());
-  updateAiButton();
   syncQuestionEcho();
-  tickLabels();
+  updateAiButton();
+  tickOverlay();
   armCameraScroll();
 }
 

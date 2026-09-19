@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0A0908">
-<meta name="description" content="穆夏塔罗 · 抽三张牌，看见过去、现在与未来。内置 78 张公版牌义，可选用 AI 深度解读。纯娱乐。">
-<title>穆夏塔罗 · 过去 现在 未来</title>
+<meta name="description" content="Mucha Tarot · 抽三张牌，看见过去、现在与未来。内置 78 张公版牌义，可选用 AI 深度解读。纯娱乐。">
+<title>Mucha Tarot</title>
 <link rel="icon" href="cards/favicon.png">
 
-<!-- 字体：标题 Cormorant Garamond；正文走系统栈 -->
+<!-- 字体：花体英文标题 Cinzel Decorative；其余 Cormorant Garamond；中文走系统栈 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:wght@300;400;500;600&display=swap">
 
 <link rel="stylesheet" href="css/style.css">
 
@@ -30,7 +30,7 @@
 </head>
 <body>
 
-<!-- Layer 0：WebGL 画布容器（fixed 铺满，三层 3D 都渲染在这一个 canvas 里） -->
+<!-- Layer 0：WebGL 画布容器（fixed 铺满，粒子星云 / 输入框雾气 / 3D 卡牌都渲染在这一个 canvas 里） -->
 <div id="gl" class="gl-layer" aria-hidden="true"></div>
 
 <!-- WebGL 不可用时的友好提示 -->
@@ -67,60 +67,45 @@
 
 <!-- ===== 首屏 ===== -->
 <header class="hero" id="hero">
-  <p class="hero-eyebrow anim-hero">Rider–Waite–Smith · 78 Cards</p>
-  <h1 class="hero-title anim-hero">穆夏塔罗</h1>
+  <h1 class="hero-title anim-hero">
+    <span class="wordmark-line">Mucha</span>
+    <span class="wordmark-line">Tarot</span>
+  </h1>
   <div class="hero-rule anim-hero"></div>
-  <p class="hero-positions anim-hero">过去<i>·</i>现在<i>·</i>未来</p>
-  <p class="hero-note anim-hero">静下心，把问题放在心里，然后抽三张牌。</p>
 
   <!-- 提问前移：问题在抽牌前输入，抽牌后带着问题进入后续解读 -->
   <div class="hero-question anim-hero">
-    <label class="ai-label" for="question">你想问什么</label>
     <textarea id="question" class="ai-input" rows="2" maxlength="200"
-      placeholder="你想问什么？（感情 / 事业 / 学业 / 其他）"></textarea>
-    <div class="hero-question-meta">
-      <p class="question-hint">同一件事短期内不宜反复占卜，牌象会失真。</p>
-      <span id="questionCount" class="ai-count">0 / 200</span>
-    </div>
+      placeholder="你想问什么？" aria-label="你想问什么"></textarea>
+    <p class="question-hint">同一件事短期内不宜反复占卜，牌象会失真。</p>
   </div>
 
   <div class="hero-actions anim-hero">
     <button id="drawBtn" class="btn-primary" type="button">开 始 抽 牌</button>
   </div>
-  <p id="drawHint" class="hero-hint anim-hero">78 张牌 · 正逆位随机</p>
+  <!-- 仅在数据加载失败等异常时写入内容，正常时为空 -->
+  <p id="drawHint" class="hero-hint anim-hero"></p>
 </header>
 
 <!-- ===== 3D 舞台（DOM 基本留空，让 3D 卡牌透出） ===== -->
 <section class="stage" id="stage" aria-label="牌阵">
   <div class="stage-action">
     <button id="drawBtn2" class="btn-primary btn-compact" type="button">再 抽 一 次</button>
-    <p class="stage-scroll-hint">向下滚动，查看牌义与解读</p>
   </div>
 </section>
 
 <!-- ===== 牌义 ===== -->
 <main class="reading" id="reading">
-  <div class="section-head">
-    <h2 class="section-title">牌 义</h2>
-    <div class="section-rule"></div>
-  </div>
+  <div class="section-rule"></div>
   <div class="reading-grid" id="readingGrid"></div>
 </main>
 
 <!-- ===== AI 解读 ===== -->
 <section class="ai" id="aiSection">
-  <div class="section-head">
-    <h2 class="section-title">AI 解 读</h2>
-    <div class="section-rule"></div>
-    <p class="section-note">用上方填写的问题进行解读。没有填写也可以，会给出整体解读。</p>
-  </div>
-
+  <div class="section-rule"></div>
   <div class="ai-card">
-    <!-- 输入框已前移到首屏，这里只回显将被使用的问题 -->
-    <p class="ai-question">
-      <span class="ai-question-label">你的问题</span>
-      <span id="aiQuestionEcho" class="ai-question-text is-empty">（未填写，将给出整体解读）</span>
-    </p>
+    <!-- 输入框在首屏，这里只回显将被使用的问题；没填则不显示 -->
+    <p class="ai-question" hidden><span id="aiQuestionEcho" class="ai-question-text"></span></p>
     <div class="ai-meta">
       <button id="aiBtn" class="btn-secondary" type="button" disabled>AI 解 读</button>
     </div>
@@ -128,22 +113,8 @@
   </div>
 </section>
 
-<!-- ===== 历史 ===== -->
-<section class="history" id="history">
-  <div class="section-head">
-    <div class="history-head">
-      <h2 class="section-title">抽 牌 记 录</h2>
-      <button id="clearBtn" class="btn-ghost" type="button">清 空</button>
-    </div>
-    <div class="section-rule"></div>
-  </div>
-  <div id="historyList" class="history-list"></div>
-</section>
-
 <footer class="site-footer">
   <div class="footer-rule"></div>
-  <p>牌义取自公版 Rider–Waite–Smith 体系；AI 解读由大模型生成。</p>
-  <p class="footer-dim">本页仅供娱乐参考，不构成任何专业建议。</p>
 </footer>
 
 <!-- 数据层：保持既有的全局变量形式（先于模块执行） -->
