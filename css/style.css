@@ -40,8 +40,8 @@
   --y-hint: 64%;             /* 传统提示：放在输入框下方、光圈上方 */
   --y-ring: 74%;
   --ring-size: 78px;
-  --orb-size: 13px;
-  --orb-gap: 15px;
+  --orb-size: 20px;        /* 直径 13 → 20px（+54%），点击区域同步放大 */
+  --orb-gap: 17px;
 
   /* 抽牌 / 看牌 / 解读各段落位 */
   --y-read: 66%;          /* 牌义文字块顶部（放大牌在其上方） */
@@ -162,19 +162,23 @@ body:not(.has-draw) .site-footer { display: none; }
 
 .opening-orbs[hidden] { display: none; }
 
+/* 点击容差：光球本体之外再留一点可点面积 */
+.orb { box-sizing: content-box; padding: 4px; margin: -4px; }
+
 .orb {
   flex: none;
   width: var(--orb-size);
   height: var(--orb-size);
   border-radius: 50%;
+  cursor: pointer;
   background: radial-gradient(circle at 50% 42%,
     rgba(255, 252, 244, 0.98) 0%,
     rgba(233, 214, 168, 0.92) 30%,
     rgba(201, 169, 97, 0.78) 58%,
     rgba(201, 169, 97, 0.14) 100%);
   box-shadow:
-    0 0 10px rgba(201, 169, 97, 0.5),
-    0 0 22px rgba(201, 169, 97, 0.2);
+    0 0 14px rgba(201, 169, 97, 0.5),
+    0 0 32px rgba(201, 169, 97, 0.2);
 }
 
 /* 最旧的那颗：缓慢呼吸式明灭（只有 1 个时保持常亮，不加这个类） */
@@ -183,11 +187,11 @@ body:not(.has-draw) .site-footer { display: none; }
 @keyframes orbAging {
   0%, 100% {
     opacity: 1;
-    box-shadow: 0 0 10px rgba(201, 169, 97, 0.5), 0 0 22px rgba(201, 169, 97, 0.2);
+    box-shadow: 0 0 14px rgba(201, 169, 97, 0.5), 0 0 32px rgba(201, 169, 97, 0.2);
   }
   50% {
     opacity: 0.24;
-    box-shadow: 0 0 4px rgba(201, 169, 97, 0.18), 0 0 10px rgba(201, 169, 97, 0.06);
+    box-shadow: 0 0 5px rgba(201, 169, 97, 0.18), 0 0 14px rgba(201, 169, 97, 0.06);
   }
 }
 
@@ -814,8 +818,8 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-hint: 62.5%;
     --y-ring: 72.5%;
     --ring-size: 70px;
-    --orb-size: 12px;
-    --orb-gap: 13px;
+    --orb-size: 18px;
+    --orb-gap: 15px;
     --y-read: 64%;
     --y-ai-ring: 28.5%;
     --y-ai-text: 38.5%;
