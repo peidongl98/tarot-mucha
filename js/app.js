@@ -808,14 +808,30 @@ function clearAiText() {
   el.aiText.classList.remove('is-on');
 }
 
-/* 解读文字：从光圈位置浮出 + 一次涟漪扩散 + 段落逐段浮现；
- * 浮现完成后光圈淡出隐去（问题 2）。 */
-function showAiText(text, instant) {
-  el.aiText.textContent = '';
+/* 解读分语种：含 ≥2 个 CJK 字符的段落归中文，其余归英文。
+ * 旧记录是纯中文，走同一路径（英文组为空 → 只显示中文）。 */
+function splitReading(text) {
   const paras = String(text).split(/\n+/).map((s) => s.trim()).filter(Boolean);
-  paras.forEach((t) => {
-    el.aiText.appendChild(elNew('p', /仅供娱乐参考/.test(t) ? 'ai-note' : null, t));
+  const en = [];
+  const cn = [];
+  paras.forEach((p) => {
+    const cjk = (p.match(/[\u4e00-\u9fff]/g) || []).length;
+    (cjk >= 2 ? cn : en).push(p);
   });
+  return { en, cn };
+}
+
+/* 解读文字（中英双语）：英文组在上、中文组在下，从光圈位置浮出 +
+ * 一次涟漪扩散 + 段落逐段浮现；浮现完成后光圈淡出隐去（问题 2）。 */
+function showAiText(text, instant) {
+  const { en, cn } = splitReading(text);
+  el.aiText.textContent = '';
+  const gEn = elNew('div', 'ai-group ai-group-en');
+  const gCn = elNew('div', 'ai-group ai-group-cn');
+  en.forEach((t) => gEn.appendChild(elNew('p', 'ai-en', t)));
+  cn.forEach((t) => gCn.appendChild(elNew('p', /仅供娱乐参考/.test(t) ? 'ai-note' : null, t)));
+  if (gEn.childElementCount) el.aiText.appendChild(gEn);
+  if (gCn.childElementCount) el.aiText.appendChild(gCn);
   el.aiText.classList.add('is-on');
   el.aiText.scrollTop = 0;
 
@@ -831,10 +847,11 @@ function showAiText(text, instant) {
   void rip.offsetWidth;
   rip.classList.add('is-on');
   window.setTimeout(() => rip.remove(), 2800);
+  const stagger = 0.3;
   gsap.fromTo(ps,
     { opacity: 0, y: 12 },
-    { opacity: 1, y: 0, duration: 0.9, stagger: 0.42, ease: 'power2.out', delay: 0.2 });
-  const totalMs = (0.2 + 0.42 * (ps.length - 1) + 0.9 + 0.4) * 1000;
+    { opacity: 1, y: 0, duration: 0.9, stagger, ease: 'power2.out', delay: 0.2 });
+  const totalMs = (0.2 + stagger * (ps.length - 1) + 0.9 + 0.4) * 1000;
   window.setTimeout(() => {
     if (!aiBusy) setAiRingVisible(false);   // 期间若重新发起解读，不抢状态
   }, totalMs);

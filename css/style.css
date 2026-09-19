@@ -716,6 +716,26 @@ body.no-3d .card-hit img { visibility: visible; }
 .ai-text .ai-note { font-size: 12px; letter-spacing: 0.08em; color: var(--faint); }
 .ai-text .ai-error { color: #E0C9A6; }
 
+/* ---------- 中英双语分组：英文在上（辅助），中文在下（主） ---------- */
+.ai-group-en { margin: 0 0 30px; }          /* 两组之间留白明显 */
+
+.ai-group-en p {
+  font-family: var(--font-display);         /* 衬线体（Cormorant Garamond） */
+  font-size: clamp(12.5px, 1.32vw, 14px);   /* 字号比中文略小 */
+  font-weight: 400;
+  letter-spacing: 0.045em;                  /* 字距稍宽 */
+  line-height: 1.9;                         /* 行高舒适 */
+  color: #AFA693;                           /* 比中文淡一档（英文为辅助） */
+}
+
+.ai-group-cn p {
+  font-family: var(--font-body);            /* 中文系统栈 */
+  font-size: clamp(14px, 1.5vw, 15.5px);    /* 字号略大 */
+  letter-spacing: 0.02em;
+  line-height: 1.78;                        /* 行高比英文紧 */
+  color: #E4DED0;
+}
+
 /* 文字浮出时的一次涟漪扩散 */
 .ai-ripple {
   position: absolute;
