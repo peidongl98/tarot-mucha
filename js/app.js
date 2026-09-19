@@ -521,6 +521,7 @@ async function startDraw() {
   currentAt = null;
   fromHistory = false;
 
+  if (scene && scene.ok) scene.setDeckRaised(false);   // 抽牌前先把牌背归位
   setInputLocked(true);
   showStarHint(false);
 
@@ -922,9 +923,13 @@ async function resetOpening(opts) {
     else t.style.opacity = '1';
   }
 
-  // 单张牌背重新出现
+  // 单张牌背重新出现（抬到上方，避免与问句/输入/提示/光圈重叠）
   deckShown = true;
-  if (scene && scene.ok) await scene.openingShowDeck();
+  openingOpened = false;
+  if (scene && scene.ok) {
+    scene.setDeckRaised(true);
+    await scene.openingShowDeck();
+  }
   else layoutFallbackCards();
 
   // 问句 / 输入 / 提示 / 光圈重新出现
@@ -1105,6 +1110,7 @@ function init() {
     }
     if (el.deckHit) el.deckHit.hidden = false;
   } else {
+    scene.setDeckRaised(false);
     scene.openingShowDeck();
     if (el.glNotice) el.glNotice.hidden = true;
   }
