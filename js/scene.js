@@ -444,7 +444,7 @@ export function createTarotScene(container) {
     // 三张牌 + 两道间隙必须落在 92% 视宽内；gapRatio 是间隙占牌宽的比例
     const gapRatio = 0.14;
     const wByWidth = (visWnear * 0.92) / (3 + 2 * gapRatio);
-    const wByHeight = (visH * 0.56) / CARD_H;
+    const wByHeight = (visH * 0.53) / CARD_H;
     const cardW = Math.max(0.34, Math.min(wByWidth, wByHeight));
     cardScale = cardW;                                      // CARD_W 恒为 1
     const spread = cardW * (1 + gapRatio);                   // 保证不重叠
@@ -486,7 +486,7 @@ export function createTarotScene(container) {
   };
   api.cardBottomY = (i) => {
     if (!slots[i]) return null;
-    return project(slots[i], -(CARD_H * cardScale) / 2 - 0.16).y;
+    return project(slots[i], -(CARD_H * cardScale) / 2 - 0.11).y;
   };
 
   /* ---------- 渲染循环 ---------- */

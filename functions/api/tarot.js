@@ -30,6 +30,12 @@ const MAX_TOKENS = 1200;
 /* 单个模型内的重试退避 */
 const RETRY_DELAYS = [900, 1800];
 
+/* 每个模型的单次时间上限（按 models 顺序对应）。
+ * 主模型 9s：它正常只需 4–6s，超时说明正被限流，尽快让位给备用模型，
+ * 而不是一口吃掉全部预算（实测会造成最终 504）。
+ * 备用模型 16s：它是最后一关，给足时间。 */
+const MODEL_CAPS = [9000, 16000];
+
 const SYSTEM_PROMPT = `你是「穆夏塔罗」的塔罗解读师，沉稳、优雅、静谧。
 
 语气与风格：
@@ -159,7 +165,8 @@ async function callGlm(key, messages, timeoutMs, model) {
 
 const isOverloaded = (r) => !!r && (r.status === 429 || String(r.code) === '1305');
 
-/* 主模型 → 备用模型依次尝试，每个模型内部退避重试；始终不越过总预算 */
+/* 主模型 → 备用模型依次尝试，始终不越过总预算。
+ * 主模型只试一次（快速让位），备用模型作为最后一关可多试一次。 */
 async function callWithFailover(key, messages, started) {
   const models = [GLM_MODEL];
   if (GLM_FALLBACK_MODEL && GLM_FALLBACK_MODEL !== GLM_MODEL) models.push(GLM_FALLBACK_MODEL);
@@ -167,19 +174,27 @@ async function callWithFailover(key, messages, started) {
   let last = null;
   let usedModel = models[0];
 
-  for (const model of models) {
-    let attempt = 0;
-    for (;;) {
+  for (let mi = 0; mi < models.length; mi++) {
+    const model = models[mi];
+    const isLast = mi === models.length - 1;
+    const attempts = isLast ? 2 : 1;
+    const cap = MODEL_CAPS[Math.min(mi, MODEL_CAPS.length - 1)];
+
+    for (let a = 0; a < attempts; a++) {
       const remain = TOTAL_BUDGET_MS - (Date.now() - started);
       if (remain < 6000) return { result: last, usedModel };
 
-      const r = await callGlm(key, messages, remain, model);
+      const r = await callGlm(key, messages, Math.min(remain, cap), model);
       last = r;
       usedModel = model;
       if (r.ok) return { result: r, usedModel };
-      if (!isOverloaded(r) || attempt >= RETRY_DELAYS.length) break;
 
-      const delay = RETRY_DELAYS[attempt++];
+      // 主模型：只在"过载"时原地重试，超时直接换模型
+      // 备用模型：过载与超时都可以再试一次
+      const retryable = isOverloaded(r) || (isLast && r.code === 'timeout');
+      if (!retryable || a === attempts - 1) break;
+
+      const delay = RETRY_DELAYS[a] || 900;
       if (Date.now() - started + delay > TOTAL_BUDGET_MS - 6000) break;
       await new Promise((res) => setTimeout(res, delay));
     }
