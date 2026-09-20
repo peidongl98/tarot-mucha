@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0A0908">
+<title>低语墙 · Whispers</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,400;1,500&display=swap">
+
+<style>
+  :root {
+    --ink: #0A0908;
+    --ink-2: #12100E;
+    --ivory: #EDE8E0;
+    --muted: #8A8278;
+    --gold: #C9A961;
+    --gold-dim: rgba(201, 169, 97, 0.55);
+    --line: rgba(201, 169, 97, 0.2);
+    --font-wordmark: 'Cinzel Decorative', 'Cormorant Garamond', Georgia, serif;
+    --font-display: 'Cormorant Garamond', 'Songti SC', 'STSong', 'SimSun', Georgia, serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    background:
+      radial-gradient(ellipse 120% 90% at 50% 18%, #1a1410 0%, #0a0806 60%, #060504 100%);
+    color: var(--ivory);
+    font-family: var(--font-display);
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 顶部柔光晕，呼应前台氛围 */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at 50% 30%, rgba(201,169,97,0.10), transparent 45%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ---------- 顶部标题 ---------- */
+  .title {
+    position: fixed;
+    top: 4.5%;
+    left: 0; right: 0;
+    text-align: center;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .title .zh {
+    font-family: var(--font-display);
+    font-size: clamp(22px, 5.5vmin, 38px);
+    letter-spacing: 0.5em;
+    text-indent: 0.5em;
+    color: var(--gold);
+    opacity: 0.85;
+  }
+  .title .en {
+    margin-top: 6px;
+    font-family: var(--font-wordmark);
+    font-size: clamp(10px, 2.2vmin, 14px);
+    letter-spacing: 0.42em;
+    text-indent: 0.42em;
+    color: var(--muted);
+  }
+
+  /* ---------- 大发光球体 ---------- */
+  .orb-wrap {
+    position: fixed;
+    top: 30%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+  }
+  .orb {
+    width: min(42vmin, 300px);
+    height: min(42vmin, 300px);
+    border-radius: 50%;
+    cursor: pointer;
+    position: relative;
+    background: radial-gradient(circle at 38% 32%,
+      #fff7e6 0%, #f3d98f 12%, #c9a961 38%, #8a6f33 66%, #2a2113 100%);
+    box-shadow:
+      0 0 70px 14px rgba(201,169,97,0.40),
+      0 0 140px 30px rgba(201,169,97,0.18),
+      inset 0 0 70px rgba(255,240,200,0.30);
+    animation: breathe 5.5s ease-in-out infinite;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.18s ease;
+  }
+  .orb:active { transform: scale(0.97); }
+  /* 旋转流光环 */
+  .orb::before {
+    content: '';
+    position: absolute;
+    inset: -6%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg,
+      transparent 0deg, rgba(255,247,230,0.55) 40deg,
+      transparent 90deg, transparent 220deg,
+      rgba(201,169,97,0.5) 270deg, transparent 320deg);
+    mix-blend-mode: screen;
+    animation: spin 14s linear infinite;
+    pointer-events: none;
+  }
+  /* 点击涟漪 */
+  .ripple {
+    position: fixed;
+    border-radius: 50%;
+    border: 1px solid var(--gold-dim);
+    pointer-events: none;
+    z-index: 3;
+    transform: translate(-50%, -50%);
+    animation: ripple 0.9s ease-out forwards;
+  }
+  .hint {
+    font-size: clamp(12px, 2.6vmin, 16px);
+    color: var(--muted);
+    letter-spacing: 0.18em;
+    font-style: italic;
+  }
+
+  /* ---------- 低语墙 ---------- */
+  .wall {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    top: 52%;
+    z-index: 2;
+    display: flex;
+    justify-content: center;
+    gap: clamp(10px, 4vw, 60px);
+    padding: 4vh 4vw 6vh;
+    overflow: hidden;
+  }
+  .col {
+    flex: 1 1 0;
+    max-width: 46%;
+    display: flex;
+    flex-direction: column;
+  }
+  .col.r { align-items: flex-end; }
+
+  .whisper {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: clamp(15px, 2.4vmin, 21px);
+    line-height: 1.5;
+    color: var(--ivory);
+    max-width: 92%;
+    text-shadow: 0 1px 10px rgba(0,0,0,0.6);
+    animation: floatIn 0.9s ease both, drift 9s ease-in-out infinite;
+    will-change: transform;
+  }
+  .col.l .whisper { text-align: left; }
+  .col.r .whisper { text-align: right; }
+
+  .empty {
+    position: fixed;
+    top: 64%; left: 0; right: 0;
+    text-align: center;
+    color: var(--faint, #5F594F);
+    font-style: italic;
+    letter-spacing: 0.2em;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* 拂去（清空） */
+  .clear {
+    position: fixed;
+    right: 16px; bottom: 14px;
+    z-index: 5;
+    font-family: var(--font-display);
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    opacity: 0.45;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .clear:hover { opacity: 0.8; color: var(--gold); }
+
+  /* ---------- 动画 ---------- */
+  @keyframes breathe {
+    0%, 100% { box-shadow: 0 0 70px 14px rgba(201,169,97,0.40), 0 0 140px 30px rgba(201,169,97,0.18), inset 0 0 70px rgba(255,240,200,0.30); }
+    50% { box-shadow: 0 0 95px 22px rgba(201,169,97,0.55), 0 0 180px 44px rgba(201,169,97,0.24), inset 0 0 80px rgba(255,240,200,0.38); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes ripple {
+    from { width: 40px; height: 40px; opacity: 0.9; }
+    to { width: 520px; height: 520px; opacity: 0; }
+  }
+  @keyframes floatIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.96); }
+    to { opacity: var(--op, 1); }
+  }
+  @keyframes drift {
+    0%, 100% { translate: 0 0; }
+    50% { translate: 0 -8px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .orb, .orb::before, .whisper { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="title">
+    <div class="zh">低 语 墙</div>
+    <div class="en">WHISPERS</div>
+  </div>
+
+  <div class="orb-wrap">
+    <div class="orb" id="orb" role="button" aria-label="点击光球，聆听众人的低语"></div>
+    <div class="hint" id="hint">轻触光球，聆听众人的低语</div>
+  </div>
+
+  <div class="wall">
+    <div class="col l" id="colL"></div>
+    <div class="col r" id="colR"></div>
+  </div>
+
+  <div class="empty" id="empty">暂无低语</div>
+  <div class="clear" id="clear">拂去</div>
+
+<script>
+  const orb = document.getElementById('orb');
+  const colL = document.getElementById('colL');
+  const colR = document.getElementById('colR');
+  const empty = document.getElementById('empty');
+  const clearBtn = document.getElementById('clear');
+  const hint = document.getElementById('hint');
+
+  const MAX_ITEMS = 90;     // 墙面容量上限，超出移除最早
+  const BATCH = 12;         // 每次点击抽取条数
+  let sideToggle = 0;       // 左右交错计数
+  let loading = false;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  function spawnRipple(x, y) {
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    r.style.left = x + 'px';
+    r.style.top = y + 'px';
+    document.body.appendChild(r);
+    setTimeout(() => r.remove(), 900);
+  }
+
+  function addWhisper(text, side) {
+    const el = document.createElement('div');
+    el.className = 'whisper';
+    el.textContent = text;
+    const mt = rand(6, 52);                       // 随机页边距（纵向间距）
+    const rot = rand(-7, 7);                      // 随机微旋
+    const dx = rand(-16, 16);                     // 随机横向漂移
+    const op = rand(0.5, 1);                      // 随机透明度，制造层次
+    el.style.marginTop = mt.toFixed(1) + 'px';
+    el.style.transform = 'translateX(' + dx.toFixed(1) + 'px) rotate(' + rot.toFixed(1) + 'deg)';
+    el.style.setProperty('--op', op.toFixed(2));
+    el.style.opacity = op.toFixed(2);
+    el.style.animationDelay = (Math.random() * 4).toFixed(2) + 's, 0s';
+    (side === 'L' ? colL : colR).appendChild(el);
+    empty.style.display = 'none';
+  }
+
+  function trimWall() {
+    while (colL.children.length + colR.children.length > MAX_ITEMS) {
+      (colL.firstChild || colR.firstChild).remove();
+    }
+  }
+
+  async function draw() {
+    if (loading) return;
+    loading = true;
+    hint.textContent = '聆听中…';
+    try {
+      const res = await fetch('/api/whispers?n=' + BATCH, { cache: 'no-store' });
+      const data = await res.json();
+      const qs = (data && data.questions) || [];
+      if (!qs.length) {
+        hint.textContent = data && data.backend === false ? '云端尚未连通' : '暂无低语，先去抽几张牌';
+      } else {
+        qs.forEach((q) => {
+          const side = (sideToggle++ % 2 === 0) ? 'L' : 'R';   // 左一条右一条
+          addWhisper(q, side);
+        });
+        trimWall();
+        hint.textContent = '再触一次，更多低语浮现';
+      }
+    } catch (e) {
+      hint.textContent = '聆听失联，稍后再试';
+    } finally {
+      loading = false;
+    }
+  }
+
+  orb.addEventListener('click', (e) => {
+    const rect = orb.getBoundingClientRect();
+    spawnRipple(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    draw();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    colL.innerHTML = '';
+    colR.innerHTML = '';
+    sideToggle = 0;
+    empty.style.display = '';
+    hint.textContent = '轻触光球，聆听众人的低语';
+  });
+</script>
+</body>
+</html>
