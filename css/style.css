@@ -721,6 +721,59 @@ body.no-3d .card-hit img { visibility: visible; }
 
 .scroll-hint.is-on { opacity: 0.88; }
 
+/* ---------- Sink：三张全翻开后浮现的底部涟漪光圈（点击进入解读） ---------- */
+.sink-zone {
+  position: fixed;
+  left: 50%;
+  bottom: 5.5%;
+  transform: translateX(-50%);
+  z-index: 3;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+.sink-zone.is-on { opacity: 1; pointer-events: auto; }
+
+.sink-label {
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13.5px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--muted);
+}
+
+/* 光圈观感与开场光圈一致：始终为「有字激活」态 */
+.sink-ring {
+  position: relative;
+  display: block;
+  margin: 0 auto;
+  width: var(--ring-size);
+  height: var(--ring-size);
+  padding: 0;
+  background: none;
+  border: 1px solid rgba(201, 169, 97, 0.5);
+  border-radius: 50%;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow:
+    0 0 26px -4px rgba(201, 169, 97, 0.3),
+    inset 0 0 20px rgba(201, 169, 97, 0.14);
+  transition: box-shadow 0.6s ease;
+}
+
+.sink-ring .ring-wave {
+  opacity: 1;
+  animation: ringWave 4.6s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+
+.sink-ring .ring-wave:nth-child(2) { animation-delay: 1.5s; }
+.sink-ring .ring-wave:nth-child(3) { animation-delay: 3.0s; }
+
 /* ---------- 滚筒左右切换：发光三角形（香槟金，呼吸式辉光） ---------- */
 .wheel-nav {
   position: fixed;

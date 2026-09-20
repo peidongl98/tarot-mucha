@@ -626,7 +626,7 @@ async function startDraw() {
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   if (scene && scene.ok) scene.wheelApply(wheel.a);   // DEAL 期间 tickOverlay 不再同步，这里显式推一次
   setInputLocked(true);
-  showStarHint(false);
+  showSink(false);
   setAiRingVisible(true);
   setAiThinking(false);
 
@@ -679,7 +679,7 @@ function onCardHit(i) {
     if (scene && scene.ok) scene.flipCard(i);
     setHitFace(i, true);
     if (cardsFlipped.every(Boolean)) {
-      window.setTimeout(() => { if (state === S.ROW) showStarHint(true); }, 950);
+      window.setTimeout(() => { if (state === S.ROW) showSink(true); }, 950);
     }
   } else {
     zoomIn(i);
@@ -690,7 +690,7 @@ function zoomIn(i) {
   if (!lastReading || !lastReading[i]) return;
   state = S.ZOOM;
   zoomIndex = i;
-  showStarHint(false);
+  showSink(false);
   if (scene && scene.ok) scene.zoomCard(i, true);
   if (el.zoomLabel) {
     el.zoomLabel.textContent = POSITIONS[i];   // 牌上方金色身份文字
@@ -707,7 +707,7 @@ function zoomOut() {
   hideMeaning();
   if (scene && scene.ok) scene.zoomCard(i, false);
   zoomIndex = -1;
-  if (cardsFlipped.every(Boolean)) showStarHint(true);
+  if (cardsFlipped.every(Boolean)) showSink(true);
 }
 
 /* 牌义面板：英文在前、中文在后，与解读同款排版（英衬线略小偏淡，中系统栈略大） */
@@ -741,8 +741,10 @@ function hideMeaning() {
   el.cardRead.classList.remove('is-on');
 }
 
-/* 底部引导占位：滑动手势已移除，Sink 光圈在下一提交接管这些调用点 */
-function showStarHint(on) { void on; }
+/* Sink 光圈：三张全翻开后浮现，点击进入解读 */
+function showSink(on) {
+  if (el.sinkZone) el.sinkZone.classList.toggle('is-on', !!on);
+}
 
 /* ============================================================
  * 阶段 3：上滑 → 解读
@@ -753,7 +755,7 @@ function enterReading() {
   state = S.READING;
   zoomIndex = -1;
   hideMeaning();
-  showStarHint(false);
+  showSink(false);
   if (scene && scene.ok) scene.setView('top');
   el.readingView.classList.add('is-on');
   el.returnOrb.classList.add('is-on');
@@ -768,7 +770,7 @@ function exitReading() {
   if (scene && scene.ok) scene.setView('row');
   el.readingView.classList.remove('is-on');
   el.returnOrb.classList.remove('is-on');
-  if (cardsFlipped.every(Boolean)) showStarHint(true);
+  if (cardsFlipped.every(Boolean)) showSink(true);
   updateHits();
 }
 
@@ -1050,7 +1052,7 @@ async function resetOpening(opts) {
   el.readingView.classList.remove('is-on');
   el.returnOrb.classList.remove('is-on');
   hideMeaning();
-  showStarHint(false);
+  showSink(false);
   if (el.wheelLabel) el.wheelLabel.classList.remove('is-on');
 
   cardsFlipped = [false, false, false];
@@ -1103,7 +1105,7 @@ async function restoreRecord(rec) {
   setAskVisible(false, true);
   showTitle(false);
   hideMeaning();
-  showStarHint(false);
+  showSink(false);
   el.question.value = lastQuestion;
   setInputLocked(true);
   syncRing();
@@ -1407,6 +1409,8 @@ function cacheDom() {
   el.readKeys = document.getElementById('readKeys');
   el.readText = document.getElementById('readText');
 
+  el.sinkZone = document.getElementById('sinkZone');
+  el.sinkRing = document.getElementById('sinkRing');
   el.wheelLabel = document.getElementById('wheelLabel');
   el.readingView = document.getElementById('readingView');
   el.aiRing = document.getElementById('aiRing');
@@ -1466,6 +1470,7 @@ function init() {
       if (e.key === 'Enter') { e.preventDefault(); startDraw(); }
     });
   }
+  if (el.sinkRing) el.sinkRing.addEventListener('click', enterReading);
   if (el.aiRing) el.aiRing.addEventListener('click', askAi);
   if (el.returnOrb) {
     el.returnOrb.addEventListener('pointerdown', startHold);
