@@ -1304,7 +1304,9 @@ export function createTarotScene(container) {
 
   /* 渲染循环里的滚筒摆位（放大 / 飞行 / 顶部视图时不接管） */
   function wheelPlace(t) {
-    if (!current.length || readingView !== 'wheel' || zoomed >= 0 || wheelBusy > 0) return;
+    /* 滚筒/牌行显示模式（'wheel' 或 'row' 都按滚轮槽位渲染）；
+     * 仅顶部固定视图（'top'，即解读态）不接管摆位。 */
+    if (!current.length || readingView === 'top' || zoomed >= 0 || wheelBusy > 0) return;
     for (let i = 0; i < current.length; i++) {
       const c = current[i];
       if (!c || c.flying) continue;
