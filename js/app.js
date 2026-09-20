@@ -626,6 +626,7 @@ async function startDraw() {
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   if (scene && scene.ok) scene.wheelApply(wheel.a);   // DEAL 期间 tickOverlay 不再同步，这里显式推一次
   setInputLocked(true);
+  setInputFocused(false);          // 离开提问环节：清除暗淡残留，避免覆盖后续页面
   showSink(false);
   setAiRingVisible(true);
   setAiThinking(false);
@@ -1079,6 +1080,7 @@ async function resetOpening(opts) {
   // 输入框归零并解锁
   el.question.value = '';
   setInputLocked(false);
+  setInputFocused(false);          // 回到开场：确保暗淡已清除
   syncRing();
 
   // 问句 / 输入 / 提示 / 光圈：状态 1 不出现，直接隐藏
@@ -1123,6 +1125,7 @@ async function restoreRecord(rec) {
   showSink(false);
   el.question.value = lastQuestion;
   setInputLocked(true);
+  setInputFocused(false);          // 历史回看：聚焦态复位，避免暗淡残留
   syncRing();
 
   deckShown = false;
@@ -1346,34 +1349,41 @@ function fitQuestion() {
 const KB_MIN = 90;            // 高度缩水超过该值视为键盘弹出
 const KB_LIFT_MARGIN = 24;    // 输入区底边与键盘顶边的间距
 let vpLock = { w: window.innerWidth, h: window.innerHeight };
-let fieldRestBottom = 0;      // 输入区静止时的底边（含流光余量）
+let kbLift = 0;               // 当前输入区上浮量（px）；测量静止底边时用来回退位移
 let kbOn = false;
+let inputFocused = false;     // 统一焦点状态：true → 非输入元素暗淡，输入区+流光上浮
 
 function lockViewport() {
   vpLock = { w: window.innerWidth, h: window.innerHeight };
   document.documentElement.style.setProperty('--vph', vpLock.h + 'px');
 }
 
-/* 量输入区静止底边（transform 不影响布局，但 rect 含当前位移，需在 --kb=0 时量） */
-function measureField() {
-  if (!el.openingField) return;
-  const prev = el.openingField.getBoundingClientRect();
-  fieldRestBottom = prev.bottom + 20;   // + 流光余量
+/* 统一焦点状态：输入框聚焦 → 非输入元素暗淡（由 CSS body.input-focused 驱动）；
+ * 失焦 / 页面切换 → 复位。true→true / false→false 直接短路，反复点击不触发重复变化。 */
+function setInputFocused(v) {
+  v = !!v;
+  if (inputFocused === v) return;
+  inputFocused = v;
+  document.body.classList.toggle('input-focused', v);
 }
 
+/* 键盘自适应：每帧实时按「输入框静止底边」计算抬升量（不受当前位移影响），
+ * 反复点击输入框也不会漂移。只写 --kb（输入区 translateY 上浮），不改布局。 */
 function handleKeyboard() {
   const vv = window.visualViewport;
   let kb = 0;
   if (vv) kb = Math.max(0, vpLock.h - vv.height - vv.offsetTop);
   const on = kb > KB_MIN;
-  let lift = 0;
-  if (on && fieldRestBottom) {
-    const kbTop = vpLock.h - kb;
-    lift = Math.max(0, Math.min(kb, fieldRestBottom + KB_LIFT_MARGIN - kbTop));
-  }
   kbOn = on;
+  let lift = 0;
+  if (on && el.openingField) {
+    const rect = el.openingField.getBoundingClientRect();
+    const restBottom = rect.bottom + kbLift;     // 回退当前上浮量 → 输入框静止底边
+    const kbTop = vpLock.h - kb;
+    lift = Math.max(0, Math.min(kb, restBottom + KB_LIFT_MARGIN - kbTop));
+  }
+  kbLift = lift;
   document.documentElement.style.setProperty('--kb', lift.toFixed(1) + 'px');
-  document.body.classList.toggle('kb-on', on);
   if (on) { try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ } }
 }
 
@@ -1386,7 +1396,6 @@ function onViewportChange() {
     return;
   }
   lockViewport();
-  measureField();
   handleKeyboard();
   setupQuestionBox();
   if (scene && scene.ok) scene.resize();
@@ -1394,7 +1403,6 @@ function onViewportChange() {
 
 function setupViewport() {
   lockViewport();
-  measureField();
   handleKeyboard();
   setupQuestionBox();
 
@@ -1407,10 +1415,15 @@ function setupViewport() {
     /* iOS 聚焦输入框时会把视觉视口滚到输入框处 —— 键盘开着时强制回顶 */
     vv.addEventListener('scroll', () => { if (kbOn) window.scrollTo(0, 0); });
   }
-  /* 聚焦瞬间阻止浏览器自动滚动（双保险） */
+  /* 焦点状态统一驱动暗淡：聚焦 → 非输入元素暗淡；失焦 → 复原。
+   * 键盘弹出时的上浮由 handleKeyboard 经 --kb 处理，这里只管焦点状态。 */
   if (el.question) {
     el.question.addEventListener('focus', () => {
       try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
+      setInputFocused(true);
+    });
+    el.question.addEventListener('blur', () => {
+      setInputFocused(false);
     });
   }
 }
