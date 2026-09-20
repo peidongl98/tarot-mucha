@@ -37,7 +37,8 @@
   --y-title: 15%;            /* 标题下移，让开顶部光球的删除操作区 */
   --y-question: 47%;         /* 旧变量：问句已并入聚簇，保留仅为兼容 */
   --y-ask-top: 52%;          /* 旧变量：聚簇已改底边锚定 */
-  --y-ask-bottom: 12%;       /* 提问聚簇底边距屏底（光圈在最下，落在这里） */
+  --y-ask-bottom: 12%;       /* 提问聚簇底边距屏底（问句/输入/提示，光圈已移出聚簇） */
+  --ring-bottom: 101px;      /* 光圈底边距屏底（固定 px：键盘改变的是视口高，百分比会跟着缩） */
   --ring-size: 78px;
   --orb-size: 20px;        /* 直径 13 → 20px（+54%），点击区域同步放大 */
   --orb-gap: 17px;
@@ -560,12 +561,20 @@ body.kb-open .opening-hint {
   100% { transform: translateX(430%); opacity: 0; }
 }
 
-/* ---------- 6. 泛涟漪光圈 ---------- */
+/* ---------- 6. 泛涟漪光圈 ----------
+ * 定位用 fixed 独立锚定屏幕底部，**DOM 上已移出 .ask-cluster**（见 index.html）。
+ * 两个必须同时做到的事：
+ *   ① 出 flex 流 —— 否则键盘态输入框被搬走后聚簇高度收缩，会把光圈顶下去；
+ *   ② 脱离 .ask-cluster 的 transform: translateX(-50%) —— transform 祖先会让
+ *      fixed 后代以它为包含块，百分比 bottom 就按"簇高"而不是"屏高"解析
+ *      （实测键盘态 12% 从 18.95px 缩到 9.75px，光圈往下漂 9px）。
+ * 因此底边用固定 px 而不是百分比：百分比在 fixed 下按视口解析，键盘一弹视口变矮
+ * 就跟着缩，光圈照样会动。 */
 .opening-ring {
-  position: relative;
-  top: auto;
-  left: auto;
-  margin: 0;
+  position: fixed;
+  left: 50%;
+  bottom: var(--ring-bottom);
+  margin: 0 0 0 calc(var(--ring-size) / -2);   /* 用负 margin 居中，把 transform 让给入场动画 */
   width: var(--ring-size);
   height: var(--ring-size);
   padding: 0;
@@ -1333,6 +1342,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 3%;
     --y-title: 14%;
     --y-ask-bottom: 10%;
+    --ring-bottom: 84px;
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
@@ -1356,6 +1366,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 2.6%;
     --y-title: 12.5%;
     --y-ask-bottom: 8%;
+    --ring-bottom: 56px;
     --ring-size: 64px;
     --y-read: 60%;
     --y-ai-ring: 27%;

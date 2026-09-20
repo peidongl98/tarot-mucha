@@ -141,14 +141,17 @@
       <span>Ask once, ask true.</span>
       <span>Ask twice, the cards lie.</span>
     </p>
-
-    <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散）—— 放在聚簇最底部 -->
-    <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
-      <span class="ring-wave"></span>
-      <span class="ring-wave"></span>
-      <span class="ring-wave"></span>
-    </button>
   </div>
+
+  <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散）
+       故意**放在 .ask-cluster 之外**：.ask-cluster 有 transform: translateX(-50%)，
+       会让 fixed 后代以它为包含块（百分比 bottom 按簇高算，键盘态簇高收缩就跟着漂）。
+       挪到 .opening 直属后 fixed 才真正相对视口，键盘全程不动。 -->
+  <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+  </button>
 
   <p id="drawHint" class="opening-error"></p>
 </header>
