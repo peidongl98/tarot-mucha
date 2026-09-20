@@ -824,6 +824,11 @@ function wheelStepTo(dir) {
  * 阶段 1：点光圈 → 抽牌
  * ============================================================ */
 
+/* 抽牌动画兜底：最多等 ms，超时即 reject，由调用方强制进入看牌态，避免永久卡在 S.DEAL */
+function dealTimeout(ms) {
+  return new Promise((_, rej) => setTimeout(() => rej(new Error('deal-timeout ' + ms)), ms));
+}
+
 async function startDraw() {
   if (state !== S.ASK) return;
   state = S.DEAL;
@@ -847,27 +852,35 @@ async function startDraw() {
   const cards = drawThree();
   lastReading = cards;
 
-  // ① 最旧光球炸成星光消失；② 剩余光球淡出（光球只在首页显示）
-  await burstOldestOrb();
-  setOrbsVisible(false);
+  const sequence = (async () => {
+    // ① 最旧光球炸成星光消失；② 剩余光球淡出（光球只在首页显示）
+    await burstOldestOrb();
+    setOrbsVisible(false);
 
-  // ③ 问句 / 输入 / 提示 / 光圈淡出
-  const fade = hideAskArea();
+    // ③ 问句 / 输入 / 提示 / 光圈淡出
+    const fade = hideAskArea();
 
-  // ④ 扇形退场 + 三张牌飞向滚筒（背面朝上）
-  if (scene && scene.ok) {
-    await scene.dealFromFan(cards.map((c) => ({
-      src: 'cards/' + TAROT_BY_ID[c.id].file,
-      reversed: !!c.reversed,
-    })));
-  } else {
-    layoutFallbackWheel();
+    // ④ 扇形退场 + 三张牌飞向滚筒（背面朝上）
+    if (scene && scene.ok) {
+      await scene.dealFromFan(cards.map((c) => ({
+        src: 'cards/' + TAROT_BY_ID[c.id].file,
+        reversed: !!c.reversed,
+      })));
+    } else {
+      layoutFallbackWheel();
+    }
+    await fade;
+  })();
+
+  try {
+    await Promise.race([sequence, dealTimeout(7000)]);
+  } catch (e) {
+    console.warn('[startDraw] 抽牌动画未按时完成，强制进入看牌：', e && e.message);
+    setOrbsVisible(false);
+  } finally {
+    if (el.burstLayer) el.burstLayer.style.display = 'none';
+    if (state === S.DEAL) { state = S.ROW; updateHits(); }   // 绝不永久卡在 DEAL
   }
-  await fade;
-
-  if (el.burstLayer) el.burstLayer.style.display = 'none';
-  state = S.ROW;
-  updateHits();
 }
 
 /* ============================================================
@@ -1353,23 +1366,30 @@ async function restoreRecord(rec) {
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   if (scene && scene.ok) scene.wheelApply(wheel.a);
 
-  // 问题 6：单张牌快速展开 → 旋转 → 淡出；同时那次的
-  // 三张牌从牌背原位置飞出，落到滚筒槽位（三张已按记录翻开）
-  const vanishP = (scene && scene.ok) ? scene.openingVanish() : Promise.resolve();
-  if (scene && scene.ok) {
-    await scene.dealFromFan(lastReading.map((c) => ({
-      src: 'cards/' + TAROT_BY_ID[c.id].file,
-      reversed: !!c.reversed,
-    })), { fromDeck: true, quick: true });
-    for (let i = 0; i < 3; i++) scene.presetFlipped(i);
-  } else {
-    for (let i = 0; i < 3; i++) setHitFace(i, true);
-  }
-  await vanishP;
+  const sequence = (async () => {
+    // 单张牌快速展开 → 旋转 → 淡出；同时那次的三张牌飞到滚筒槽位（已按记录翻开）
+    const vanishP = (scene && scene.ok) ? scene.openingVanish() : Promise.resolve();
+    if (scene && scene.ok) {
+      await scene.dealFromFan(lastReading.map((c) => ({
+        src: 'cards/' + TAROT_BY_ID[c.id].file,
+        reversed: !!c.reversed,
+      })), { fromDeck: true, quick: true });
+      for (let i = 0; i < 3; i++) scene.presetFlipped(i);
+    } else {
+      for (let i = 0; i < 3; i++) setHitFace(i, true);
+    }
+    await vanishP;
+  })();
 
-  // 直接进入滚筒（先看牌）；下滑才看那次的解读
-  state = S.ROW;
-  updateHits();
+  try {
+    await Promise.race([sequence, dealTimeout(7000)]);
+  } catch (e) {
+    console.warn('[restoreRecord] 回看动画未按时完成，强制进入看牌：', e && e.message);
+    setOrbsVisible(false);
+  } finally {
+    // 直接进入滚筒（先看牌）；下滑才看那次的解读；绝不永久卡在 DEAL
+    if (state === S.DEAL) { state = S.ROW; updateHits(); }
+  }
 }
 
 /* ============================================================

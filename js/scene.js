@@ -308,11 +308,23 @@ function makeMistGeometry(count) {
 const loader = new THREE.TextureLoader();
 loader.setCrossOrigin('anonymous');
 
+/* 加载贴图。关键：真机（尤其微信内置浏览器/弱网）图片请求可能「既不 onLoad 也不 onError」
+ * 永久挂起，导致 await 永不 resolve → 抽牌死锁在 S.DEAL。这里加硬超时（4s），超时按
+ * 缺失处理（resolve(null)，退回纯色牌面），从源头杜绝挂起。 */
 function loadTexture(url, anisotropy) {
   return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);            // 超时 → 退回纯色牌面，不阻塞抽牌
+    }, 4000);
     loader.load(
       url,
       (tex) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = anisotropy;
         tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -321,7 +333,12 @@ function loadTexture(url, anisotropy) {
         resolve(tex);
       },
       undefined,
-      () => resolve(null)   // 贴图缺失时不阻塞，退回纯色牌面
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);          // 贴图缺失时不阻塞，退回纯色牌面
+      }
     );
   });
 }
