@@ -56,15 +56,9 @@ export async function onRequestPost(ctx) {
 }
 
 export async function onRequestDelete(ctx) {
-  const { request, env } = ctx;
-  const db = env.DB;
-  if (!db) return json({ success: false, error: 'no-db' }, 503);
-  const u = new URL(request.url);
-  const deviceId = u.searchParams.get('device_id') || '';
-  const at = u.searchParams.get('at') || '';
-  if (!deviceId || !at) return json({ success: false, error: 'invalid' }, 400);
-  await db.prepare('DELETE FROM orbs WHERE device_id=? AND at=?').bind(deviceId, at).run();
-  return json({ success: true });
+  /* 云端记录刻意不可删：删除只发生在本地（前端把 at 记入隐藏集，云端原样保留）。
+   * 这里直接拒绝，确保任何路径都无法移除线上记录（"线上记录一直在"）。 */
+  return json({ success: false, error: 'delete-disabled' }, 403);
 }
 
 function safeParse(s, fallback) {

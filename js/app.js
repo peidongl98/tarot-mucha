@@ -27,9 +27,11 @@ const MAX_QUESTION_LEN = 200;
 const POSITIONS = ['Past', 'Present', 'Future'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-/* 顶部光球：本地最多存 ORB_MAX 条（突破旧 3 条上限）；云端 D1 同步同一上限 */
-const ORB_MAX = 50;
+/* 顶部光球：本地仅展示最新 ORB_MAX 条（滚动窗口）；云端 D1 存全部（最多 CAP 条，见 functions/api/orbs.js）。
+ * 删除 = 仅本地：把 at 记入本地隐藏集，云端记录保持不动（"线上记录一直在"）。 */
+const ORB_MAX = 3;
 const ORB_KEY = 'tarot_orbs';
+const ORBS_HIDDEN_KEY = 'tarot_orbs_hidden';   // 本地已删除（仅隐藏）的 at 列表，云端仍保留
 const DEVICE_KEY = 'tarot_device_id';   // 匿名设备标识，用于云端按设备隔离记录
 /* 更早版本用 localStorage 存抽牌历史列表，那套 UI 已移除；顺手清掉遗留键 */
 const LEGACY_KEY = 'tarot_history';
@@ -345,6 +347,23 @@ function writeOrbs(list) {
   try { localStorage.setItem(ORB_KEY, JSON.stringify(list)); } catch (e) { /* 忽略 */ }
 }
 
+/* 本地隐藏集：记录被「本地删除」的 at（云端仍有，只是本机不显示）。
+ * 这样刷新后云端拉取不会把已删的重新拉回来，而线上记录始终保留。 */
+function loadHidden() {
+  try {
+    const raw = localStorage.getItem(ORBS_HIDDEN_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(list) ? list.map(String) : []);
+  } catch (e) { return new Set(); }
+}
+
+function addHidden(at) {
+  if (!at) return;
+  const s = loadHidden();
+  s.add(String(at));
+  try { localStorage.setItem(ORBS_HIDDEN_KEY, JSON.stringify(Array.from(s))); } catch (e) { /* 忽略 */ }
+}
+
 /* 匿名设备标识：本地生成一次，存 localStorage；云端按此隔离记录，无需登录 */
 function getDeviceId() {
   let id = '';
@@ -587,7 +606,7 @@ function commitOrbDelete() {
   }
   records = records.filter((x) => String(x.at) !== String(rec.at));
   writeOrbs(records);
-  cloudDelete(rec.at);                  // 云端同步删除
+  addHidden(rec.at);                    // 仅本地隐藏（不删云端）：线上记录一直在
   hideOrbArc();
   if (orb && orb.parentNode) orb.parentNode.removeChild(orb);   // 移除被拖出的副本（renderOrbs 重建）
   orbDel = null;
@@ -1692,20 +1711,21 @@ function init() {
   renderOrbs(records);
   /* 云端同步：
    *  - D1 未配置（backend:false）→ cloudPull 返回 null → 保留本地，不动
-   *  - D1 已配置 → 本地 + 云端按 at 合并（云端优先），写回本地；
-   *    仅本地存在、云端没有的记录补推上云（完成绑定前历史的迁移，不丢数据） */
+   *  - D1 已配置 → 本地 + 云端按 at 合并（云端优先），排除本地已隐藏的 at，写回本地（最多 ORB_MAX 条）；
+   *    仅本地存在、云端没有的记录补推上云（迁移绑定前历史）；云端记录永不删除。 */
   cloudPull().then((orbs) => {
     if (!orbs) return;                       // 无云端：纯本地
+    const hidden = loadHidden();
     const cloudAts = new Set(orbs.map((r) => String(r && r.at)));
     const byAt = new Map();
-    records.forEach((r) => { if (r && r.at) byAt.set(String(r.at), r); });
-    orbs.forEach((r) => { if (r && r.cards && r.cards.length === 3) byAt.set(String(r.at), r); }); // 云端覆盖
+    records.forEach((r) => { if (r && r.at && !hidden.has(String(r.at))) byAt.set(String(r.at), r); });
+    orbs.forEach((r) => { if (r && r.cards && r.cards.length === 3 && !hidden.has(String(r.at))) byAt.set(String(r.at), r); }); // 云端覆盖，排除已隐藏
     records = Array.from(byAt.values())
       .sort((a, b) => (a.at || 0) - (b.at || 0))
       .slice(-ORB_MAX);
     writeOrbs(records);
     if (state === S.OPENING) renderOrbs(records);
-    /* 把仅本地有的历史补推上云 */
+    /* 把仅本地有的历史补推上云（云端不删，隐藏集内的不在此列） */
     records.forEach((r) => { if (r && r.at && !cloudAts.has(String(r.at))) cloudPush(r); });
   });
 
