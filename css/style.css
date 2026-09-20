@@ -34,7 +34,7 @@
 
   /* 开场各阶段落位（占开场高度的百分比） */
   --y-orbs: 3.2%;            /* 顶部光球展示区 */
-  --y-title: 10%;
+  --y-title: 15%;            /* 标题下移，让开顶部光球的删除操作区 */
   --y-question: 47%;
   --y-ask-top: 52%;        /* 提问聚簇（输入框→流光→光圈→提示）顶部落位 */
   --ring-size: 78px;
@@ -201,7 +201,11 @@ body.input-focused .opening-ring {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;      /* Firefox 隐藏滚动条 */
   -ms-overflow-style: none;
+  touch-action: pan-x;        /* 只允许横向滚动容器本身；纵向/斜向拖拽交给长按删除手势 */
 }
+/* 长按删除激活后：禁止浏览器接管任何手势，确保 pointermove 连续到达 */
+body.orb-deleting .opening-orbs { touch-action: none; }
+.orb.is-del-flash, .orb.is-del-drag { touch-action: none; }
 .opening-orbs::-webkit-scrollbar { display: none; }   /* WebKit 隐藏滚动条 */
 
 .opening-orbs[hidden] { display: none; }
@@ -360,6 +364,10 @@ body.input-focused .opening-ring {
   pointer-events: none;
   animation: none !important;
   transition: none !important;
+  will-change: transform;
+  box-shadow:
+    0 0 22px rgba(255, 138, 138, 0.75),
+    0 0 54px rgba(255, 120, 120, 0.4) !important;   /* 拖拽中变红，明确"正在删除" */
 }
 
 /* ---------- 1. 顶部花体标题 ---------- */
@@ -1222,7 +1230,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --gap-section: var(--gap-section-sm);
     --pad-x: 20px;
     --y-orbs: 3%;
-    --y-title: 9%;
+    --y-title: 14%;
     --y-question: 46%;
     --y-ask-top: 50%;
     --ring-size: 70px;
@@ -1246,7 +1254,7 @@ body.no-3d .card-hit img { visibility: visible; }
 @media (max-height: 720px) {
   :root {
     --y-orbs: 2.6%;
-    --y-title: 7.5%;
+    --y-title: 12.5%;
     --y-question: 43%;
     --y-ask-top: 46%;
     --ring-size: 64px;

@@ -540,13 +540,18 @@ const ORB_DRAG_SCALE = 2.4;        // 拖拽态放大倍数（与 CSS --orb-drag
 let orbDel = null;                 // { orb, rec, pid, originX, originY, dx, dy, moved, committed }
 let suppressOrbClick = false;
 
-function positionArcAt(orb) {
+function positionArcAt(orb, x, y) {
   if (!el.orbDeleteArc) return;
-  const target = orb || (el.orbRow && el.orbRow.querySelector('.orb'));
-  if (!target) return;
-  const r = target.getBoundingClientRect();
-  el.orbDeleteArc.style.left = (r.left + r.width / 2) + 'px';
-  el.orbDeleteArc.style.top = (r.top + r.height / 2) + 'px';
+  let px = x, py = y;
+  if (px == null || py == null) {
+    const target = orb || (el.orbRow && el.orbRow.querySelector('.orb'));
+    if (!target) return;
+    const r = target.getBoundingClientRect();
+    px = r.left + r.width / 2;
+    py = r.top + r.height / 2;
+  }
+  el.orbDeleteArc.style.left = px + 'px';
+  el.orbDeleteArc.style.top = py + 'px';
 }
 function showOrbArc(orb) {
   positionArcAt(orb);
@@ -609,6 +614,7 @@ function onOrbPointerDown(e) {
     originX: r.left + r.width / 2, originY: r.top + r.height / 2,
     dx: 0, dy: 0, moved: false, committed: false, _home: null,
   };
+  document.body.classList.add('orb-deleting');   // 禁用容器手势，保证 pointermove 连续
   orb.classList.add('is-del-flash');
   showOrbArc(orb);
 }
@@ -643,10 +649,16 @@ function onOrbDeleteMove(e) {
   }
   if (orbDel.moved) {
     orbDel.orb.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + ORB_DRAG_SCALE + ')';
+    /* 穹顶（删除圈）实时跟随球中心：球一旦移出圈外即炸成光 */
+    positionArcAt(null, orbDel.originX + dx, orbDel.originY + dy);
   }
   const dist = Math.hypot(dx, dy);
-  if (el.orbDeleteArc) el.orbDeleteArc.classList.toggle('is-danger', dist > ORB_DELETE_DRAG * 0.7);
-  if (dist > ORB_DELETE_DRAG) commitOrbDelete();
+  /* 穹顶直径 = 球径*5（SVG r=46/100 → 实心圆约 0.92 倍容器宽）。判定半径取穹顶内圈，
+   * 即「球移出这个圈」就炸成光。 */
+  const arcR = el.orbDeleteArc ? el.orbDeleteArc.offsetWidth * 0.46 : ORB_DELETE_DRAG;
+  const threshold = Math.min(ORB_DELETE_DRAG, arcR);
+  if (el.orbDeleteArc) el.orbDeleteArc.classList.toggle('is-danger', dist > threshold * 0.62);
+  if (dist > threshold) commitOrbDelete();
 }
 
 function onOrbDeleteUp() {
@@ -669,6 +681,7 @@ function commitOrbDelete() {
   writeOrbs(records);
   addHidden(rec.at);                    // 本地隐藏集（无云端时降级也生效）
   cloudHide(rec.at);                   // 云端标 hidden=1：清缓存也不复活
+  document.body.classList.remove('orb-deleting');
   hideOrbArc();
   if (orb && orb.parentNode) orb.parentNode.removeChild(orb);   // 移除被拖出的副本（renderOrbs 重建）
   orbDel = null;
@@ -681,6 +694,7 @@ function commitOrbDelete() {
 function cancelOrbDelete() {
   if (!orbDel) return;
   const { orb, dx, dy } = orbDel;
+  document.body.classList.remove('orb-deleting');
   hideOrbArc();
   orb.classList.remove('is-del-flash', 'is-del-drag');
   const gsap = window.gsap;
