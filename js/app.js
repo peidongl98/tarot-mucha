@@ -450,6 +450,91 @@ async function burstOldestOrb() {
   return true;
 }
 
+/* ---------- 首页光球：长按激活 → 半圆弧流光 → 拖出即删除 ---------- */
+const ORB_DELETE_DRAG = 60;        // 拖离原位超过此距离（px）即删除
+let orbDel = null;                 // { orb, rec, pid, originX, originY, dx, dy, moved, committed }
+let suppressOrbClick = false;
+
+function showOrbArc() { if (el.orbDeleteArc) el.orbDeleteArc.classList.add('is-on'); }
+function hideOrbArc() { if (el.orbDeleteArc) el.orbDeleteArc.classList.remove('is-on', 'is-danger'); }
+
+function onOrbPointerDown(e) {
+  if (state !== S.OPENING || orbDel) return;
+  const orb = e.target && e.target.closest ? e.target.closest('.orb') : null;
+  if (!orb || !orb.dataset.at) return;
+  const rec = records.filter((r) => String(r.at) === orb.dataset.at)[0];
+  if (!rec) return;
+  e.preventDefault();
+  try { orb.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  const r = orb.getBoundingClientRect();
+  orbDel = {
+    orb, rec, pid: e.pointerId,
+    originX: r.left + r.width / 2, originY: r.top + r.height / 2,
+    dx: 0, dy: 0, moved: false, committed: false,
+  };
+  orb.classList.add('is-del-flash');
+  showOrbArc();
+}
+
+function onOrbDeleteMove(e) {
+  if (!orbDel || orbDel.committed) return;
+  const dx = e.clientX - orbDel.originX;
+  const dy = e.clientY - orbDel.originY;
+  orbDel.dx = dx; orbDel.dy = dy;
+  if (!orbDel.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+    orbDel.moved = true;
+    orbDel.orb.classList.remove('is-del-flash');
+    orbDel.orb.classList.add('is-del-drag');
+  }
+  if (orbDel.moved) {
+    orbDel.orb.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.28)';
+  }
+  const dist = Math.hypot(dx, dy);
+  if (el.orbDeleteArc) el.orbDeleteArc.classList.toggle('is-danger', dist > ORB_DELETE_DRAG * 0.7);
+  if (dist > ORB_DELETE_DRAG) commitOrbDelete();
+}
+
+function onOrbDeleteUp() {
+  if (!orbDel || orbDel.committed) return;
+  cancelOrbDelete();                      // 松手未拖出 → 回弹取消
+}
+
+function commitOrbDelete() {
+  if (!orbDel || orbDel.committed) return;
+  orbDel.committed = true;
+  const { orb, rec } = orbDel;
+  const r = orb.getBoundingClientRect();
+  const pts = [];
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2;
+    const rr = (i % 5) * 1.7;
+    pts.push({ x: r.width / 2 + Math.cos(a) * rr, y: r.height / 2 + Math.sin(a) * rr });
+  }
+  records = records.filter((x) => String(x.at) !== String(rec.at));
+  writeOrbs(records);
+  hideOrbArc();
+  orbDel = null;
+  if (!REDUCED) burstOut(pts, r, 24);    // 炸成光点
+  renderOrbs(records, { animateNew: false });
+  suppressOrbClick = true;               // 阻止随后误触的 click 回看
+  window.setTimeout(() => { suppressOrbClick = false; }, 60);
+}
+
+function cancelOrbDelete() {
+  if (!orbDel) return;
+  const { orb, dx, dy } = orbDel;
+  hideOrbArc();
+  orb.classList.remove('is-del-flash', 'is-del-drag');
+  const gsap = window.gsap;
+  if (gsap && !REDUCED) {
+    gsap.fromTo(orb, { x: dx, y: dy, scale: 1.28 },
+      { x: 0, y: 0, scale: 1, duration: 0.32, ease: 'power3.out', onComplete: () => { orb.style.transform = ''; } });
+  } else {
+    orb.style.transform = '';
+  }
+  orbDel = null;
+}
+
 /* ============================================================
  * 开场：点牌背展开扇形
  * ============================================================ */
@@ -1459,6 +1544,7 @@ function cacheDom() {
 
   el.opening = document.getElementById('opening');
   el.orbRow = document.getElementById('orbRow');
+  el.orbDeleteArc = document.getElementById('orbDeleteArc');
   el.openingTitle = document.getElementById('openingTitle');
   el.openingQuestion = document.getElementById('openingQuestion');
   el.openingField = document.querySelector('.opening-field');
@@ -1552,6 +1638,7 @@ function init() {
       return records.filter((r) => String(r.at) === orb.dataset.at)[0] || null;
     };
     el.orbRow.addEventListener('click', (e) => {
+      if (suppressOrbClick) { suppressOrbClick = false; return; }
       const rec = pick(e.target);
       if (rec) restoreRecord(rec);
     });
@@ -1562,6 +1649,11 @@ function init() {
       e.preventDefault();
       restoreRecord(rec);
     });
+    el.orbRow.addEventListener('pointerdown', onOrbPointerDown);
+    el.orbRow.addEventListener('pointermove', onOrbDeleteMove);
+    el.orbRow.addEventListener('pointerup', onOrbDeleteUp);
+    el.orbRow.addEventListener('pointercancel', onOrbDeleteUp);
+    el.orbRow.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   /* ---- 视口锁定 + 键盘自适应 ----

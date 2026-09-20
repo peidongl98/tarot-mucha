@@ -104,6 +104,12 @@
 <header class="opening" id="opening">
   <!-- 0. 顶部光球展示区（最多 3 个，居中对称；从左到右：最旧 → 最新） -->
   <div class="opening-orbs" id="orbRow" data-count="0" hidden></div>
+  <div class="orb-delete-arc" id="orbDeleteArc" aria-hidden="true">
+    <svg viewBox="0 0 240 140" preserveAspectRatio="xMidYMid meet">
+      <path class="arc-line arc-a" d="M20,120 A100,100 0 0 1 220,120" />
+      <path class="arc-line arc-b" d="M34,120 A86,86 0 0 1 206,120" />
+    </svg>
+  </div>
 
   <!-- 1. 花体标题（点击牌背后淡出，返回开场时重新出现） -->
   <h1 class="opening-title" id="openingTitle">Tarot</h1>
