@@ -36,9 +36,7 @@
   --y-orbs: 3.2%;            /* 顶部光球展示区 */
   --y-title: 10%;
   --y-question: 47%;
-  --y-field: 54.5%;
-  --y-hint: 64%;             /* 传统提示：放在输入框下方、光圈上方 */
-  --y-ring: 74%;
+  --y-ask-top: 52%;        /* 提问聚簇（输入框→流光→光圈→提示）顶部落位 */
   --ring-size: 78px;
   --orb-size: 20px;        /* 直径 13 → 20px（+54%），点击区域同步放大 */
   --orb-gap: 17px;
@@ -170,12 +168,15 @@ body:not(.has-draw) .site-footer { display: none; }
   transition: filter 0.45s ease;
 }
 
-body.kb-on .gl-layer,
-body.kb-on .opening-title,
-body.kb-on .opening-orbs,
-body.kb-on .opening-question,
-body.kb-on .opening-hint,
-body.kb-on .opening-ring {
+/* 统一焦点状态：输入框聚焦 → 非输入元素整体暗淡压暗（只改 filter/brightness+opacity，
+ * 绝不动 transform / scale / size / position）。失焦或页面切换 → body 去掉该类即复原。
+ * 注意：这里不能用全局 overlay 盖整页，只针对非输入元素本身。 */
+body.input-focused .gl-layer,
+body.input-focused .opening-title,
+body.input-focused .opening-orbs,
+body.input-focused .opening-question,
+body.input-focused .opening-hint,
+body.input-focused .opening-ring {
   filter: brightness(0.6) opacity(0.38);
 }
 
@@ -292,15 +293,33 @@ body.kb-on .opening-ring {
 }
 
 /* ---------- 5. 无框输入框 ---------- */
-/* 输入区：上浮只作用于这里（含流光），键盘弹出时 translateY 到键盘上方 */
-.opening-field {
+/* 提问聚簇：输入框 → 流光 → 光圈 → 提示，垂直方向由 flex 控制间距，
+ * 任意屏幕高度下都不重叠；容器本身不拦截指针（避免挡住牌背点击）。 */
+.ask-cluster {
   position: absolute;
-  top: var(--y-field);
   left: 50%;
-  transform: translate(-50%, calc(-1 * var(--kb, 0px)));
-  transition: transform 0.45s cubic-bezier(0.33, 0, 0.2, 1);
+  top: var(--y-ask-top);
+  transform: translateX(-50%);
   width: min(80vw, 520px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 输入区：上浮只作用于这里（含流光），键盘弹出时 translateY 到键盘上方；
+ * 只动 transform（translateY）/ opacity，永不改 size / position / 其他 transform。 */
+.opening-field {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: translateY(calc(-1 * var(--kb, 0px)));
+  transition: transform 0.45s cubic-bezier(0.33, 0, 0.2, 1), opacity 0.4s ease;
+  width: 100%;
   opacity: 0;
+  pointer-events: auto;
 }
 
 .opening-input {
@@ -385,12 +404,12 @@ body.kb-on .opening-ring {
 
 /* ---------- 6. 泛涟漪光圈 ---------- */
 .opening-ring {
-  position: absolute;
-  top: var(--y-ring);
-  left: 50%;
+  position: relative;
+  top: auto;
+  left: auto;
+  margin: 0;
   width: var(--ring-size);
   height: var(--ring-size);
-  margin: 0 0 0 calc(var(--ring-size) / -2);
   padding: 0;
   background: none;
   border: 1px solid rgba(201, 169, 97, 0.24);
@@ -398,6 +417,7 @@ body.kb-on .opening-ring {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   opacity: 0;
+  pointer-events: auto;
   box-shadow: inset 0 0 16px rgba(201, 169, 97, 0.05);
   transition: border-color 0.85s ease, box-shadow 0.85s ease;
 }
@@ -457,10 +477,10 @@ body.kb-on .opening-ring {
 
 /* ---------- 传统提示（英文两行，衬线斜体，纯提示不做限制） ---------- */
 .opening-hint {
-  position: absolute;
-  top: var(--y-hint);
-  left: 0;
-  right: 0;
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
   margin: 0;
   display: flex;
   flex-direction: column;
@@ -1087,9 +1107,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 3%;
     --y-title: 9%;
     --y-question: 46%;
-    --y-field: 53.5%;
-    --y-hint: 62.5%;
-    --y-ring: 72.5%;
+    --y-ask-top: 50%;
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
@@ -1113,9 +1131,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 2.6%;
     --y-title: 7.5%;
     --y-question: 43%;
-    --y-field: 51%;
-    --y-hint: 60%;
-    --y-ring: 70%;
+    --y-ask-top: 46%;
     --ring-size: 64px;
     --y-read: 60%;
     --y-ai-ring: 27%;
