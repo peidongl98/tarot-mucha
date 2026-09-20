@@ -252,6 +252,59 @@ body.input-focused .opening-ring {
   50%      { transform: translateY(-4px); }
 }
 
+/* ---------- 光球长按删除：半圆弧流光 + 拖拽态 ---------- */
+.orb-delete-arc {
+  position: absolute;
+  left: 50%;
+  top: var(--y-orbs);
+  transform: translate(-50%, -50%);
+  width: 240px;
+  height: 140px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  z-index: 3;
+}
+.orb-delete-arc.is-on { opacity: 1; }
+.orb-delete-arc svg { width: 100%; height: 100%; overflow: visible; display: block; }
+.arc-line {
+  fill: none;
+  stroke: rgba(233, 214, 168, 0.85);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 9 15;
+  filter: drop-shadow(0 0 6px rgba(201, 169, 97, 0.7));
+  animation: arcFlow 1.15s linear infinite;
+}
+.arc-b {
+  stroke: rgba(255, 250, 238, 0.7);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 19;
+  animation-direction: reverse;
+}
+.orb-delete-arc.is-danger .arc-line {
+  stroke: rgba(255, 138, 138, 0.95);
+  filter: drop-shadow(0 0 8px rgba(255, 120, 120, 0.8));
+}
+@keyframes arcFlow { to { stroke-dashoffset: -48; } }
+
+/* 激活删除：球闪烁 */
+.orb.is-del-flash {
+  animation: orbDelFlash 0.52s ease-in-out infinite !important;
+  z-index: 5;
+}
+@keyframes orbDelFlash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+/* 拖拽中：跟随手指，提升层级，停闪烁 */
+.orb.is-del-drag {
+  z-index: 6;
+  pointer-events: none;
+  animation: none !important;
+  transition: none !important;
+}
+
 /* ---------- 1. 顶部花体标题 ---------- */
 .opening-title {
   position: absolute;
@@ -305,8 +358,8 @@ body.input-focused .opening-ring {
 .ask-cluster {
   position: absolute;
   left: 50%;
-  top: var(--y-ask-top);
-  transform: translateX(-50%);
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: min(80vw, 520px);
   display: flex;
   flex-direction: column;
@@ -1114,7 +1167,6 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 3%;
     --y-title: 9%;
     --y-question: 46%;
-    --y-ask-top: 50%;
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
@@ -1138,7 +1190,6 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 2.6%;
     --y-title: 7.5%;
     --y-question: 43%;
-    --y-ask-top: 46%;
     --ring-size: 64px;
     --y-read: 60%;
     --y-ai-ring: 27%;
