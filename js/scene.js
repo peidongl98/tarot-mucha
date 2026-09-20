@@ -1772,7 +1772,7 @@ export function createTarotScene(container) {
   };
 
   /* 翻牌：绕 Y 轴 180°；逆位牌翻完后绕 Z 轴再转 180° */
-  api.flipCard = function (i) {
+  api.flipCard = function (i, onDone) {
     const c = current[i];
     if (!c || c.flipped) return null;
     c.flipped = true;
@@ -1780,11 +1780,15 @@ export function createTarotScene(container) {
     if (!gsap) {
       c.flipper.rotation.y = 0;
       if (c.reversed) c.spin.rotation.z = Math.PI;
+      onDone && onDone(i);              // 无动画路径也要回调，否则浮层永不出场
       return null;
     }
     const tl = gsap.timeline();
     tl.to(c.flipper.rotation, { y: 0, duration: 1.0, ease: 'power2.inOut' });
     if (c.reversed) tl.to(c.spin.rotation, { z: Math.PI, duration: 0.6, ease: 'power2.inOut' }, '>-0.08');
+    /* 逆位还要多转 180°，整条时间轴结束 ≠ 翻面结束 —— 用 tl.eventCallback('onComplete')
+     * 而不是挂在第一段 tween 上，保证「翻面动画完全结束」这个语义准确。 */
+    if (onDone) tl.eventCallback('onComplete', () => onDone(i));
     return tl;
   };
 

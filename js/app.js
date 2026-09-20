@@ -752,12 +752,58 @@ function openFan() {
   openingOpened = true;
   deckShown = false;
   if (el.deckHit) el.deckHit.hidden = true;
+  /* 过渡提示：先浮出中英提示 + 花体光描边 → 停留 → 整块下沉消失。
+   * 时序全部在这里，跑到「完全消失」才继续下面的扇形展开 —— 不靠 setTimeout 猜。 */
+  playGateNote(openFanStage);
+}
+
+/* 过渡提示播完之后，真正展开扇形 + 拉出提问区 */
+function openFanStage() {
   if (scene && scene.ok) scene.openingFan();
   if (window.gsap && !REDUCED) window.gsap.delayedCall(0.06, fadeTitle);
   else fadeTitle();
   showAskArea();
   state = S.ASK;
   setOrbsVisible(false);          // 离开首页：光球淡出
+}
+
+/* 「仅供娱乐」过渡提示：浮出 → 停留 1.6s → 下沉消失
+ * 详情见 css 的 .gate-note。兜底（无 gsap / 减弱动效）直接跳过，不阻塞流程。 */
+const GATE_HOLD_MS = 1600;
+const GATE_IN_S = 0.85;
+const GATE_OUT_S = 0.7;
+
+function playGateNote(done) {
+  const n = el.gateNote;
+  const gsap = window.gsap;
+  if (!n || !gsap || REDUCED) { done(); return; }
+
+  gsap.killTweensOf(n);
+  n.classList.add('is-on');
+  gsap.set(n, { opacity: 0, y: 22, filter: 'blur(9px)' });
+
+  /* ① 浮出（破水感，与牌名浮层同款语言） */
+  gsap.to(n, {
+    opacity: 1, y: 0, filter: 'blur(0px)',
+    duration: GATE_IN_S, ease: 'power3.out',
+    onComplete: () => {
+      gsap.set(n, { clearProps: 'filter' });
+      n.classList.add('is-float');       // 呼吸接手
+    },
+  });
+
+  /* ② 停留 ③ 下沉消失（y 正向下坠、无缩放，读起来是「沉下去」而不是「化掉」） */
+  gsap.to(n, {
+    opacity: 0, y: 46, filter: 'blur(7px)',
+    duration: GATE_OUT_S, ease: 'power2.in',
+    delay: GATE_IN_S + GATE_HOLD_MS / 1000,
+    onStart: () => { n.classList.remove('is-float'); },
+    onComplete: () => {
+      n.classList.remove('is-on');
+      gsap.set(n, { clearProps: 'all' });
+      done();
+    },
+  });
 }
 
 /* 问句 / 输入 / 提示 / 光圈：只在「状态 2（点牌背后）」出现。
@@ -990,7 +1036,7 @@ function onCardHit(i) {
 
   if (!cardsFlipped[i]) {
     cardsFlipped[i] = true;
-    if (scene && scene.ok) scene.flipCard(i);
+    if (scene && scene.ok) scene.flipCard(i, () => initZoomFloat(i));
     setHitFace(i, true);
     if (cardsFlipped.every(Boolean)) {
       window.setTimeout(() => { if (state === S.ROW) showSink(true); }, 950);
@@ -1007,10 +1053,11 @@ function zoomIn(i) {
   showSink(false);
   if (scene && scene.ok) scene.zoomCard(i, true);
   if (el.zoomLabel) {
-    el.zoomLabel.textContent = POSITIONS[i];   // 牌上方金色身份文字
+    el.zoomLabel.textContent = POSITIONS[i];
     el.zoomLabel.classList.add('is-on');
   }
   showMeaning(i);
+  initZoomFloat(i);        // 已翻开的牌：class 已在 → 直接返回；翻面路径由 flipCard 回调补播
 }
 
 function zoomOut() {
@@ -1024,35 +1071,102 @@ function zoomOut() {
   if (cardsFlipped.every(Boolean)) showSink(true);
 }
 
-/* 牌义面板：英文在前、中文在后，与解读同款排版（英衬线略小偏淡，中系统栈略大） */
+/* 牌义视图分三层，互不影响滚动：
+ *   ① .read-float  牌名 + 正逆位 —— fixed，钉在放大牌面正中，只在开场时补播浮出
+ *   ② .read-keys   关键词 —— fixed，钉在牌面下沿；中英各一行（英文在前、略淡）
+ *   ③ .card-read   牌义正文 —— 独立滚动容器，在牌下方滚动
+ * 注意：牌名/正逆位只在「牌从牌背翻过来」的那一次（刚点开牌）接管；
+ * 从滚筒切到已翻开的牌（zoomCard）时 .read-float 的 class 在 initZoomFloat 里
+ * 已挂着，here 只换文字 → 不再闪一遍浮出动画。 */
 function showMeaning(i) {
   const meta = TAROT_BY_ID[lastReading[i].id];
   const cn = TAROT_MEANINGS[lastReading[i].id] || null;
   const en = (typeof TAROT_MEANINGS_EN !== 'undefined' && TAROT_MEANINGS_EN[lastReading[i].id]) || null;
   const rev = !!lastReading[i].reversed;
 
-  const gEn = elNew('div', 'ai-group read-group-en');
-  if (en || meta) gEn.appendChild(elNew('h2', 'read-name', (en && en.name) || meta.en || meta.name));
-  gEn.appendChild(elNew('p', 'read-badge', rev ? 'REVERSED' : 'UPRIGHT'));
-  if (en) {
-    gEn.appendChild(elNew('p', 'read-keys', (rev ? en.revKeys : en.upKeys).join(' · ')));
-    gEn.appendChild(elNew('p', 'read-text read-text-en', rev ? en.rev : en.up));
+  /* ① 牌名 + 正逆位（固定浮层，落在放大牌面正中） */
+  if (el.rfName) el.rfName.textContent = (en && en.name) || meta.en || meta.name;
+  if (el.rfBadge) el.rfBadge.textContent = rev ? 'REVERSED' : 'UPRIGHT';
+
+  /* ② 关键词：中英对照，英文一行在上、中文一行在下 */
+  if (el.readKeys) {
+    el.readKeys.textContent = '';
+    const kEn = en ? (rev ? en.revKeys : en.upKeys).join(' · ') : '';
+    const kCn = cn ? (rev ? cn.revKeys : cn.upKeys).join(' · ') : '';
+    if (kEn) el.readKeys.appendChild(elNew('p', 'read-keys-en', kEn));
+    if (kCn) el.readKeys.appendChild(elNew('p', 'read-keys-cn', kCn));
+    el.readKeys.classList.add('is-on');
   }
 
-  const gCn = elNew('div', 'ai-group read-group-cn');
-  if (cn) {
-    gCn.appendChild(elNew('p', 'read-keys', (rev ? cn.revKeys : cn.upKeys).join(' · ')));
-    gCn.appendChild(elNew('p', 'read-text read-text-cn', rev ? cn.rev : cn.up));
-  }
-
+  /* ③ 牌义正文：英文在上（辅助）、中文在下（主），与解读同款双语排版 */
+  const gEn = elNew('div', 'read-group-en');
+  const gCn = elNew('div', 'read-group-cn');
+  if (en) gEn.appendChild(elNew('p', 'read-text read-text-en', rev ? en.rev : en.up));
+  if (cn) gCn.appendChild(elNew('p', 'read-text read-text-cn', rev ? cn.rev : cn.up));
   el.cardRead.textContent = '';
-  el.cardRead.appendChild(gEn);
-  el.cardRead.appendChild(gCn);
+  if (gEn.childElementCount) el.cardRead.appendChild(gEn);
+  if (gCn.childElementCount) el.cardRead.appendChild(gCn);
+  el.cardRead.scrollTop = 0;
   el.cardRead.classList.add('is-on');
 }
 
 function hideMeaning() {
   el.cardRead.classList.remove('is-on');
+  if (el.readKeys) el.readKeys.classList.remove('is-on');
+  hideReadFloat();
+}
+
+/* ---------- 牌名浮层的出现 / 收起 ----------
+ * 出现时机由 scene.flipCard 的 onFlipDone 回调驱动（= 3D 翻面动画完全结束），
+ * 不在 DOM 侧猜时间 —— 换缓动、改时长都不会让浮层跑在牌前面。
+ * 调用方用 pendingNameFly 标记「这次翻面后要浮出」；已经在浮的牌重复回调时不做二次。 */
+const NAME_FLY_T = 1.15;
+let pendingNameFly = false;
+
+function hideReadFloat() {
+  const f = el.readFloat;
+  if (!f) return;
+  pendingNameFly = false;
+  const gsap = window.gsap;
+  if (gsap) gsap.killTweensOf([f, f.children]);
+  f.classList.remove('is-on', 'is-float');
+  if (gsap) gsap.set(f, { opacity: 0, y: 30, filter: 'blur(10px)' });
+  else f.style.opacity = '0';
+}
+
+function revealReadFloat(i) {
+  pendingNameFly = false;
+  if (i !== zoomIndex) return;          // 牌已收回 / 已切到别张：不补播
+  const f = el.readFloat;
+  if (!f || f.classList.contains('is-on')) return;
+  const gsap = window.gsap;
+
+  if (!gsap || REDUCED) {
+    f.classList.add('is-on', 'is-float');
+    f.style.opacity = '1';
+    f.style.filter = 'none';
+    return;
+  }
+
+  /* 「像浮出水面」：从小、低、模糊的深处上浮到牌面正中，落定后才开始呼吸 */
+  f.classList.add('is-on');
+  f.style.visibility = 'visible';
+  gsap.set(f, { opacity: 0, y: 34, scale: 0.84, filter: 'blur(12px)' });
+  gsap.to(f, {
+    opacity: 1, y: 0, scale: 1, filter: 'blur(0px)',
+    duration: NAME_FLY_T, ease: 'power3.out',
+    onComplete: () => {
+      gsap.set(f, { clearProps: 'filter' });
+      f.classList.add('is-float');      // 呼吸接手（动画本身有 1.9s delay，正好接住）
+    },
+  });
+}
+
+/* 翻面动画结束后浮出牌名：首次翻牌是「牌背 → 牌面」那一瞬。
+ * 从滚筒切到已翻开的牌也调一次 —— 此时 .read-float 已带 is-on，直接返回不重播。 */
+function initZoomFloat(i) {
+  if (!lastReading || !lastReading[i]) return;
+  revealReadFloat(i);
 }
 
 /* Sink 光圈：三张全翻开后浮现，点击进入解读 */
@@ -1111,12 +1225,6 @@ function clearAiText() {
   el.aiText.classList.remove('is-on');
 }
 
-/* 免责声明文案：模型输出、前端兜底、块尾剥离三处共用同一份常量，
- * 改文案时只改这里，不会漏改。 */
-const NOTE_EN = 'For entertainment reference only.';
-const NOTE_CN = '以上解读仅供娱乐参考';
-const READING_NOTES = [NOTE_EN, NOTE_CN];
-
 /* 解读分语种：先按空行分段（段内偶发的软换行合并回一段），
  * 再按语言归类 —— 含 ≥2 个 CJK 字符的段归中文，其余归英文。
  * 旧记录是纯中文，走同一路径（英文组为空 → 只显示中文）。 */
@@ -1124,42 +1232,22 @@ function splitReading(text) {
   const blocks = String(text)
     .split(/\r?\n\s*\r?\n/)                       // 空行 = 段落边界
     .map((b) => {
-      let joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ').trim();
+      const joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ').trim();
       if (!joined) return null;
-      /* 免责句可能出现在块尾，且两条（英文+中文）常常挨在同一个块里
-       * （模型把 "For entertainment reference only." 与 "以上解读仅供娱乐参考"
-       * 连写在末尾）。所以要从后往前反复摘，直到块尾不再是免责句为止，
-       * 否则先匹配到中文那条、英文那条就残留在正文里。 */
-      const notes = [];
-      for (;;) {
-        const hit = READING_NOTES.find((n) => joined.endsWith(n));
-        if (!hit) break;
-        notes.unshift(hit);
-        joined = joined.slice(0, joined.length - hit.length).trim();
-      }
-      const note = notes[0] || '';
-      if (!joined) return notes.length ? { text: '', note } : null;
-      return { text: joined, note };
+      return joined;
     })
     .filter(Boolean);
 
   const enRaw = [];
   const cn = [];
-  let enNote = '';
-  let cnNote = '';
-  blocks.forEach((p) => {
-    if (p.note) {
-      if (/entertainment/i.test(p.note)) { if (!enNote) enNote = p.note; }
-      else if (!cnNote) cnNote = p.note;
-      if (!p.text) return;                        // 免责单独成块：正文跳过
-    }
-    if (!p.text) return;
-    const cjk = (p.text.match(/[\u4e00-\u9fff]/g) || []).length;
-    (cjk >= 2 ? cn : enRaw).push(p.text);
+  blocks.forEach((t) => {
+    const cjk = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+    (cjk >= 2 ? cn : enRaw).push(t);
   });
 
   /* 兜底归并：模型偶发把英文段按空行多拆一倍。
-   * 中英段落按顺序一一对应 —— 当英文段数是中文的整数倍时，按序均匀合并回对应段。 */
+   * 中英段落按顺序一一对应 —— 当英文段数是中文的整数倍时，按序均匀合并回对应段，
+   * 否则英文会碎成好几小段、与中文段对不上，看起来就像「中英混在一起」。 */
   let en = enRaw;
   if (cn.length > 0 && enRaw.length > cn.length && enRaw.length % cn.length === 0) {
     const k = enRaw.length / cn.length;
@@ -1168,7 +1256,7 @@ function splitReading(text) {
       en.push(enRaw.slice(i * k, (i + 1) * k).join(' '));
     }
   }
-  return { en, cn, enNote, cnNote };
+  return { en, cn };
 }
 
 /* 解读文字（中英双语）：英文组在上、中文组在下，从光圈位置浮出 +
@@ -1192,9 +1280,9 @@ function showAiText(text) {
   const gCn = elNew('div', 'ai-group ai-group-cn');
   en.forEach((t) => gEn.appendChild(elNew('p', 'ai-en', t)));
   cn.forEach((t) => gCn.appendChild(elNew('p', null, t)));
-  // 免责声明前端兜底：模型偶发漏写时自动补上（extract 到了就用模型的，保证不重复）
-  gEn.appendChild(elNew('p', 'ai-note ai-note-en', r.enNote || NOTE_EN));
-  gCn.appendChild(elNew('p', 'ai-note', r.cnNote || NOTE_CN));
+  /* 英文组在上、中文组在下，之间由 .ai-group-en 的 margin 拉开明显留白。
+   * 两组的字号/字色/字体都不同 —— 只要分组正确，视觉上就是「英一段、中一段」，
+   * 不再混成一片。 */
   if (gEn.childElementCount) el.aiText.appendChild(gEn);
   if (gCn.childElementCount) el.aiText.appendChild(gCn);
   el.aiText.scrollTop = 0;
@@ -1953,15 +2041,16 @@ function cacheDom() {
   el.ringBtn = document.getElementById('ringBtn');
   el.question = document.getElementById('question');
   el.drawHint = document.getElementById('drawHint');
+  el.gateNote = document.getElementById('gateNote');
 
   el.cardRead = document.getElementById('cardRead');
   el.zoomLabel = document.getElementById('zoomLabel');
   el.navPrev = document.getElementById('wheelPrev');
   el.navNext = document.getElementById('wheelNext');
-  el.readName = document.getElementById('readName');
-  el.readBadge = document.getElementById('readBadge');
+  el.readFloat = document.getElementById('readFloat');   // 牌名 + 正逆位浮层（fixed）
+  el.rfName = document.getElementById('rfName');
+  el.rfBadge = document.getElementById('rfBadge');
   el.readKeys = document.getElementById('readKeys');
-  el.readText = document.getElementById('readText');
 
   el.sinkZone = document.getElementById('sinkZone');
   el.sinkRing = document.getElementById('sinkRing');

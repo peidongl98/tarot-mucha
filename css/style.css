@@ -53,6 +53,15 @@
   --y-zoom-label: 4.2%;   /* 放大态的金色身份标签 */
   --y-wheel-nav: 44.5%;   /* 滚筒左右切换三角形（与滚筒中线对齐） */
 
+  /* 放大态浮层锚点：与 scene.js 的 zoomHeightRatio(0.52) / zoomCenterY(0.345)
+   * 同源 —— 只有两边用同一组数字，牌名才压得准牌面中心。
+   *   --zoom-card-h  放大牌在屏幕上的高
+   *   --zoom-card-cy 放大牌顶边距屏顶（= 牌心高 - 牌高/2）
+   *   --zoom-keys-y  关键词带顶边（牌底再往下 12px） */
+  --zoom-card-h: min(52svh, 153vw);
+  --zoom-card-cy: calc(34.5svh - var(--zoom-card-h) / 2);
+  --zoom-keys-y: calc(34.5svh + var(--zoom-card-h) / 2 + 22px);
+
   /* 视口高度：直接用 CSS 原生的 svh（小视口高），不锁 px。
    * 用 svh 而非 dvh —— dvh 会随地址栏伸缩实时变化，导致整屏布局在滑动时跳动；
    * svh 取"地址栏展开时"的最小高，全程稳定，也不会产生滚动条。 */
@@ -102,7 +111,14 @@ body:not(.has-draw) .site-footer { display: none; }
   left: 0;
   right: 0;
   top: 0;
-  height: var(--vph);       /* 锁定视口高：键盘弹出时画布与主布局都不挤压 */
+  /* 画布高度用 100lvh（大视口高 = 所有 UI 都收起时的最大高），不用 --vph。
+   * 原因：--vph 是 svh（小视口高），iOS Safari / 微信 X5 在软键盘弹出时会把
+   * svh 缩减，画布的 CSS 尺寸随之变化、而 render buffer 未重设 →
+   * 画面被拉伸，表现为「扇形牌被键盘挤压变形」。
+   * lvh 取的是"UI 全收起"的最大值，键盘与地址栏都不会让它缩小 → 画布尺寸恒定，
+   * 相机宽高比恒定 → 扇形位置/大小/浮动节奏完全不受键盘影响。
+   * html{overflow:hidden} 已裁掉溢出，多出的部分不会产生滚动条。 */
+  height: 100lvh;
   z-index: 0;
   pointer-events: none;
   transition: filter 0.45s ease;
@@ -160,6 +176,82 @@ body:not(.has-draw) .site-footer { display: none; }
   position: relative;
   z-index: 1;
   height: var(--vph);       /* 锁定视口高（JS 写入 px）：键盘弹出时布局不挤压 */
+}
+
+/* ---------- 开场过渡提示（点牌背 → 扇形展开之间） ----------
+ * 花体 + 淡金 + 光描边 + 呼吸浮动；停留 1.5~2s 后整块下沉消失（不是淡出）。
+ * fixed 全屏居中，不参与 .opening 的排版，因此不会挤动任何东西。 */
+.gate-note {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;                            /* 压在光球与牌背之上、扇形之下 */
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  /* 牌背是浅色金纹，浅金字直接压上去几乎读不出。中间压一层径向暗化，
+     只压提示文字那一带，牌的边缘与背景星点仍然保留。 */
+  background: radial-gradient(closest-side ellipse at 50% 50%,
+    rgba(6, 8, 14, 0.72) 0%,
+    rgba(6, 8, 14, 0.54) 46%,
+    rgba(6, 8, 14, 0.00) 86%);
+}
+
+.gate-note.is-on { visibility: visible; }
+
+.gate-note-cn,
+.gate-note-en {
+  margin: 0;
+  font-family: var(--font-display);
+  color: #F6E9C6;
+  -webkit-text-stroke: 0.6px rgba(214, 182, 110, 0.70);
+  paint-order: stroke fill;
+  text-shadow:
+    0 0 12px rgba(214, 182, 110, 0.70),
+    0 0 32px rgba(214, 182, 110, 0.36),
+    0 0 70px rgba(214, 182, 110, 0.18);
+}
+
+.gate-note-cn {
+  font-size: clamp(30px, 5.4vw, 46px);
+  letter-spacing: 0.30em;
+  text-indent: 0.30em;
+}
+
+.gate-note-en {
+  margin-top: 14px;
+  font-size: clamp(12px, 1.6vw, 15px);
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--gold);
+}
+
+/* 呼吸 / 浮动：与浮出动画错开 0.75s 起手，避免两个动画抢同一属性 */
+.gate-note.is-float .gate-note-cn,
+.gate-note.is-float .gate-note-en {
+  animation: gateBreathe 3.6s ease-in-out infinite 0.75s;
+}
+
+@keyframes gateBreathe {
+  0%, 100% {
+    text-shadow:
+      0 0 12px rgba(214, 182, 110, 0.60),
+      0 0 32px rgba(214, 182, 110, 0.30),
+      0 0 70px rgba(214, 182, 110, 0.15);
+  }
+  50% {
+    text-shadow:
+      0 0 20px rgba(240, 216, 160, 0.95),
+      0 0 48px rgba(214, 182, 110, 0.55),
+      0 0 96px rgba(214, 182, 110, 0.30);
+  }
 }
 
 /* ---------- 键盘自适应（visualViewport） ----------
@@ -826,49 +918,157 @@ body.no-3d .card-hit img { visibility: visible; }
 
 .zoom-label.is-on { opacity: 0.95; }
 
-.read-name {
+/* ---------- 放大态浮层：牌名 + 正逆位，钉在放大牌面正中 ----------
+   与 .card-read 完全解耦：本层 fixed 不滚动，牌义在下面的独立滚动区里滚。
+   定位用 --zoom-card-cy / --zoom-card-h，与 scene.js 的 zoomHeightRatio /
+   zoomCenterY 同源，所以浮层永远压在牌的垂直中心上，换屏高也不会跑偏。 */
+.read-float {
+  position: fixed;
+  left: 50%;
+  top: var(--zoom-card-cy);
+  width: min(86vw, 640px);
+  margin-left: max(-320px, -43vw);      /* 居中（transform 留给 GSAP 浮出动画） */
+  /* 高度 = 牌高，内容居中 → 牌名永远压在牌的垂直中线上。
+     高度撑满是为了给 GSAP 的 y/scale 浮出动画留基准，文字本身不占满。 */
+  height: var(--zoom-card-h);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;                            /* 与 .card-read 同层，DOM 在后 → 压在其上 */
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  /* 牌面本身是彩色插画，金色字直接压上去会沉进去。用一层「中间浓、四周透」
+     的径向暗化把中线压暗 —— 只压牌名那一带，牌的画框与四角仍然透亮。 */
+  background: radial-gradient(closest-side ellipse at 50% 50%,
+    rgba(6, 8, 14, 0.80) 0%,
+    rgba(6, 8, 14, 0.62) 42%,
+    rgba(6, 8, 14, 0.00) 82%);
+}
+
+.read-float.is-on { visibility: visible; }
+
+/* 牌名：花体 + 淡金 + 神性光晕（描边 + 双层 drop-shadow 模拟呼吸光） */
+.rf-name {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(23px, 3.4vw, 31px);
+  font-size: clamp(30px, 4.6vw, 46px);
   font-weight: 400;
-  letter-spacing: 0.09em;
-  color: var(--ivory);
+  letter-spacing: 0.10em;
+  text-indent: 0.10em;
+  color: #F6E9C6;
+  -webkit-text-stroke: 0.6px rgba(214, 182, 110, 0.70);
+  paint-order: stroke fill;
+  text-shadow:
+    0 0 12px rgba(214, 182, 110, 0.70),
+    0 0 30px rgba(214, 182, 110, 0.38),
+    0 2px 10px rgba(0, 0, 0, 0.85),        /* 暗底：保证压在任何画面上都能读 */
+    0 0 60px rgba(214, 182, 110, 0.18);
 }
 
-.read-badge {
-  margin: 5px 0 0;
-  font-size: 11.5px;
-  letter-spacing: 0.26em;
-  color: var(--gold);
-}
-
-.read-group-en { margin: 0 0 24px; }
-
-.read-name {
-  margin: 0;
+/* 正逆位：字距拉开的小字，压在牌名正下方 */
+.rf-badge {
+  margin: 10px 0 0;
   font-family: var(--font-display);
-  font-size: clamp(23px, 3.4vw, 31px);
-  font-weight: 400;
-  letter-spacing: 0.09em;
-  color: var(--ivory);
-}
-
-.read-badge {
-  margin: 5px 0 0;
-  font-size: 11.5px;
-  letter-spacing: 0.26em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
   color: var(--gold);
+  text-shadow: 0 0 12px rgba(214, 182, 110, 0.60), 0 1px 6px rgba(0, 0, 0, 0.9);
 }
 
+/* 浮出水面：透明 + 下沉 + 模糊 → 清晰浮到牌面正中，随后开始呼吸 */
+.read-float.is-float .rf-name {
+  animation: rfGlow 4.6s ease-in-out infinite 1.9s;   /* 1.9s 后接手，不与浮出重合 */
+}
+
+@keyframes rfGlow {
+  0%, 100% {
+    text-shadow:
+      0 0 10px rgba(214, 182, 110, 0.50),
+      0 0 26px rgba(214, 182, 110, 0.26),
+      0 0 52px rgba(214, 182, 110, 0.13);
+  }
+  50% {
+    text-shadow:
+      0 0 16px rgba(232, 205, 148, 0.85),
+      0 0 40px rgba(214, 182, 110, 0.50),
+      0 0 84px rgba(214, 182, 110, 0.28);
+  }
+}
+
+/* 关键词：牌面下沿（牌底与牌义之间那条窄带），中英各一行、不滚动 */
 .read-keys {
-  margin: 13px 0 0;
+  position: fixed;
+  left: 50%;
+  top: var(--zoom-keys-y);
+  width: min(88vw, 660px);
+  margin: 0 0 0 max(-330px, -44vw);
+  z-index: 4;
+  text-align: center;
   font-size: 12.5px;
   letter-spacing: 0.1em;
+  line-height: 1.7;
   color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease 0.25s;
 }
 
+.read-keys.is-on { opacity: 1; }
+
+.read-keys-en {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  letter-spacing: 0.10em;
+  color: #AFA693;
+}
+
+/* 中文关键词两行 + 与英文之间的间距由 margin 给，避免额外空 <p> */
+.read-keys-en + .read-keys-cn { margin-top: 6px; }
+
+.read-keys-cn {
+  margin: 0;
+  font-size: 12.5px;
+  letter-spacing: 0.16em;
+  color: #C9C0AE;
+}
+
+/* ---------- 牌义正文：独立滚动容器（牌下方），与上面的浮层互不影响 ----------
+ * top 必须用与 --zoom-keys-y 同一套 svh 变量算，不能写 %：
+ *   % 相对包含块高（viewport 高）解析，svh 相对"小视口高"解析，两者在矮屏上
+ *   差 10~20px —— 混用会让关键词带落到牌义面板里（实测压 30~48px）。
+ *   统一成 svh 后，「牌底 → 关键词 → 牌义」是同一把尺子上的链式关系，
+ *   换任何屏高都不会交叉。 */
+.card-read {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--zoom-keys-y) + 60px);   /* 关键词带高 ~49px + 11px 呼吸间隙 */
+  bottom: 3%;
+  width: min(86vw, 640px);
+  z-index: 4;
+  padding: 40px 0 118px;                /* 上 > 上淡化带(26px)，下留 4~5 行余量 */
+  overflow-y: auto;                     /* 双语内容更长：面板独立滚动 */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(16px);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
+}
+
+/* 牌义正文双语：英文在上（辅助、衬线、略小偏淡）、中文在下（主） */
+.read-group-en { margin: 0 0 26px; }        /* 两语之间留白明显 */
+
 .read-text-en {
-  margin: 15px 0 0;
+  margin: 0;
   font-family: var(--font-display);       /* 英文衬线 */
   font-size: clamp(12.5px, 1.32vw, 14px); /* 略小 */
   letter-spacing: 0.045em;                /* 字距稍宽 */
@@ -876,14 +1076,12 @@ body.no-3d .card-hit img { visibility: visible; }
   color: #AFA693;                         /* 比中文淡一档 */
 }
 
-.read-group-cn .read-keys { color: var(--muted); }
-
 .read-text-cn {
-  margin: 14px 0 0;
+  margin: 0;
   font-family: var(--font-body);          /* 中文系统栈 */
   font-size: clamp(13.5px, 1.45vw, 15px); /* 略大 */
   letter-spacing: 0.02em;
-  line-height: 1.82;                      /* 行高比英文紧 */
+  line-height: 1.82;                      /* 行高比中文紧 */
   color: #E4DED0;
 }
 
@@ -1081,12 +1279,12 @@ body.no-3d .card-hit img { visibility: visible; }
   fill: none;
   stroke-linecap: round;
   stroke-width: 1.6;
-  stroke: rgba(129, 216, 208, 0.06);        /* 底纹：极淡的青，勾出路径走向 */
+  stroke: rgba(214, 182, 110, 0.06);        /* 底纹：极淡的金，勾出路径走向 */
   /* 光段长度 110，间隔 290（满程 400）→ 曲线上约 1/4 段亮着，
-   * 配上 blur 光晕就是「一段青色流光沿曲线爬行」。 */
+   * 配上 blur 光晕就是「一段金色流光沿曲线爬行」。 */
   stroke-dasharray: 110 290;
   stroke-dashoffset: 0;
-  filter: drop-shadow(0 0 4px rgba(129, 216, 208, 0.55));
+  filter: drop-shadow(0 0 4px rgba(214, 182, 110, 0.55));
 }
 
 /* 流动的光段：用 dasharray 造「一小段亮 + 长段空」的效果 */
@@ -1097,11 +1295,13 @@ body.no-3d .card-hit img { visibility: visible; }
 /* 每条线的颜色与速度（速度/方向都不同 → 交错穿插）。
  * ⚠️ 必须带 .ai-ring.is-thinking ~ 前缀：上面那条 `animation` 简写会把
  * animation-duration 重置为 3.6s，特异性更低的选择器改不动它，
- * 结果就是四条线同速同向、"交错感"消失。 */
-.ring-streams .rs-a { stroke: rgba(150, 232, 224, 0.58); stroke-width: 1.8; }
-.ring-streams .rs-b { stroke: rgba(126, 210, 202, 0.44); }
-.ring-streams .rs-c { stroke: rgba(160, 238, 230, 0.50); }
-.ring-streams .rs-d { stroke: rgba(118, 198, 192, 0.36); }
+ * 结果就是四条线同速同向、"交错感"消失。
+ * 色相统一到香槟金（与光圈 border 同色系），只用明度/透明度分层，
+ * 避免蓝色系在暖金界面里跳出来。 */
+.ring-streams .rs-a { stroke: rgba(240, 216, 160, 0.62); stroke-width: 1.8; }
+.ring-streams .rs-b { stroke: rgba(214, 182, 110, 0.46); }
+.ring-streams .rs-c { stroke: rgba(233, 207, 152, 0.54); }
+.ring-streams .rs-d { stroke: rgba(198, 166, 100, 0.38); }
 
 .ai-ring.is-thinking ~ .ring-streams .rs-a { animation-duration: 3.2s; }
 .ai-ring.is-thinking ~ .ring-streams .rs-b { animation-duration: 4.6s; animation-direction: reverse; }
