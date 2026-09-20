@@ -923,14 +923,14 @@ async function startDraw() {
   lastReading = cards;
 
   const sequence = (async () => {
-    // ① 最旧光球炸成星光消失；② 剩余光球淡出（光球只在首页显示）
-    await burstOldestOrb();
+    // ① 最旧光球炸成星光消失（与后续动画并行，不阻塞牌出场）
+    const burstP = burstOldestOrb();
     setOrbsVisible(false);
 
-    // ③ 问句 / 输入 / 提示 / 光圈淡出
+    // ② 问句 / 输入 / 提示 / 光圈淡出
     const fade = hideAskArea();
 
-    // ④ 扇形退场 + 三张牌飞向滚筒（背面朝上）
+    // ③ 扇形退场 + 三张牌飞向滚筒（背面朝上）—— 立即开播，不等光球炸星
     if (scene && scene.ok) {
       await scene.dealFromFan(cards.map((c) => ({
         src: 'cards/' + TAROT_BY_ID[c.id].file,
@@ -940,6 +940,7 @@ async function startDraw() {
       layoutFallbackWheel();
     }
     await fade;
+    await burstP.catch(() => {});
   })();
 
   try {
