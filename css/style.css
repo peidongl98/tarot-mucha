@@ -37,8 +37,7 @@
   --y-title: 15%;            /* 标题下移，让开顶部光球的删除操作区 */
   --y-question: 47%;         /* 旧变量：问句已并入聚簇，保留仅为兼容 */
   --y-ask-top: 52%;          /* 旧变量：聚簇已改底边锚定 */
-  --y-ask-bottom: 12%;       /* 提问聚簇底边距屏底（问句/输入/提示，光圈已移出聚簇） */
-  --ring-bottom: 101px;      /* 光圈底边距屏底（固定 px：键盘改变的是视口高，百分比会跟着缩） */
+  --y-ask-bottom: 12%;       /* 提问聚簇底边距屏底（问句/输入框/光圈/提示整体锚定处） */
   --ring-size: 78px;
   --orb-size: 20px;        /* 直径 13 → 20px（+54%），点击区域同步放大 */
   --orb-gap: 17px;
@@ -448,6 +447,17 @@ body.orb-deleting .opening-orbs { touch-action: none; }
 /* 问句与输入框之间留出更宽的呼吸位（问句是独立段落，不与输入争位） */
 .ask-cluster .opening-question { margin-bottom: 10px; }
 
+/* 键盘态占位：只在键盘态显示，恰好占住被搬走的输入框那一格。
+ * 用同一个 gap（14px）自然继承，高度 = 输入框固定高 78px + 流光高度。
+ * 目的：聚簇高度不变 → 底边锚定下顶部不动 → 光圈/提示原地不动。 */
+.field-placeholder { display: none; }
+body.kb-open .ask-cluster .field-placeholder {
+  display: block;
+  width: 100%;
+  height: 78px;          /* = .opening-input 的固定高度 */
+  flex: 0 0 auto;
+}
+
 /* 输入区：键盘弹出时上浮只作用于这里，且必须「脱离 flex 流」——
  * 否则 translateY 上浮会穿过上方问句 / 下方提示的文字（用户反馈的"输入被顶飞"）。
  * 键盘态（body.kb-open）下改为 fixed：top 锚定在键盘顶边上方，
@@ -473,8 +483,10 @@ body.kb-open .opening-field {
   transition: opacity 0.4s ease;   /* 定位变化不做 transition，避免跟手漂移 */
 }
 
-/* 键盘弹出：问句与提示跟着淡化隐藏（输入框已浮到键盘上方，不再需要它们占位） */
+/* 键盘弹出：问句 / 光圈 / 提示跟着淡化隐藏（输入框已浮到键盘上方，
+ * 它们留在原位会被键盘遮住，不如隐去）。位置**不变**，只改 opacity。 */
 body.kb-open .opening-question,
+body.kb-open .opening-ring,
 body.kb-open .opening-hint {
   opacity: 0 !important;
   transition: opacity 0.32s ease;
@@ -562,19 +574,18 @@ body.kb-open .opening-hint {
 }
 
 /* ---------- 6. 泛涟漪光圈 ----------
- * 定位用 fixed 独立锚定屏幕底部，**DOM 上已移出 .ask-cluster**（见 index.html）。
- * 两个必须同时做到的事：
- *   ① 出 flex 流 —— 否则键盘态输入框被搬走后聚簇高度收缩，会把光圈顶下去；
- *   ② 脱离 .ask-cluster 的 transform: translateX(-50%) —— transform 祖先会让
- *      fixed 后代以它为包含块，百分比 bottom 就按"簇高"而不是"屏高"解析
- *      （实测键盘态 12% 从 18.95px 缩到 9.75px，光圈往下漂 9px）。
- * 因此底边用固定 px 而不是百分比：百分比在 fixed 下按视口解析，键盘一弹视口变矮
- * 就跟着缩，光圈照样会动。 */
+ * 普通 flex 项（static），位置完全由 .ask-cluster 的纵向排版决定：
+ * 夹在「输入框」与「提示」之间，上下都靠 gap 隔开，任何屏幕高度都不重叠。
+ *
+ * ⚠️ 不要给它 position: fixed / absolute。
+ * 用过 fixed「修键盘位移」，结果它脱离文档流、不再参与聚簇排版，
+ * 在矮屏上直接落到提示文字身上（实测 5/5 屏高全部重叠）。
+ * 现在它天然随聚簇排版 —— 键盘态由 .field-placeholder 撑住聚簇高度，
+ * 顶部不动，光圈也就原地不动。 */
 .opening-ring {
-  position: fixed;
-  left: 50%;
-  bottom: var(--ring-bottom);
-  margin: 0 0 0 calc(var(--ring-size) / -2);   /* 用负 margin 居中，把 transform 让给入场动画 */
+  position: static;
+  margin: 0;
+  flex: 0 0 auto;
   width: var(--ring-size);
   height: var(--ring-size);
   padding: 0;
@@ -587,6 +598,12 @@ body.kb-open .opening-hint {
   pointer-events: auto;
   box-shadow: inset 0 0 16px rgba(201, 169, 97, 0.05);
   transition: border-color 0.85s ease, box-shadow 0.85s ease;
+}
+
+/* 光圈上下留出比统一 gap 更大的呼吸位 —— 它是圆形、视觉重量大，
+ * 贴着输入框/提示都显挤。用 margin 单独调，不动聚簇的 gap（不影响别的层）。 */
+.ask-cluster .opening-ring {
+  margin: 6px 0 10px;
 }
 
 /* 有字后：光圈整体提亮（内圈 + 外晕 + 边框），作为"可以开始解读"的信号 */
@@ -1342,7 +1359,6 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 3%;
     --y-title: 14%;
     --y-ask-bottom: 10%;
-    --ring-bottom: 84px;
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
@@ -1366,7 +1382,6 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 2.6%;
     --y-title: 12.5%;
     --y-ask-bottom: 8%;
-    --ring-bottom: 56px;
     --ring-size: 64px;
     --y-read: 60%;
     --y-ai-ring: 27%;

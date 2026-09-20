@@ -122,9 +122,8 @@
   <!-- 1. 花体标题（点击牌背后淡出，返回开场时重新出现） -->
   <h1 class="opening-title" id="openingTitle">Tarot</h1>
 
-  <!-- 2+3+5+4. 提问聚簇：问句 → 输入框 → 泛涟漪光圈 → 传统提示。
-       全部由 flex 纵向排布、间距统一由 gap 控制，
-       因此输入 1 / 2 / 3 行（乃至缩到最小字号）都不可能压到问句或提示。 -->
+  <!-- 2+3+5+4. 提问聚簇：问句 → 输入框 → 光圈 → 提示（自上而下）。
+       全部由 flex 纵向排布、间距统一由 gap 控制，任何屏幕高度都不会重叠。 -->
   <div class="ask-cluster" id="askCluster">
     <!-- 2. 神秘问句 -->
     <p class="opening-question" id="openingQuestion">Whisper your question…</p>
@@ -136,22 +135,30 @@
       <span class="field-stream" aria-hidden="true"><i></i></span>
     </div>
 
+    <!-- 键盘态占位：输入框被 JS 搬成 body 直接子节点后会脱离聚簇，聚簇少一个
+         flex 项就会塌缩 92px（78px 输入框 + 14px gap），底边锚定下顶部随之下移，
+         光圈/提示在淡出过程中能看见滑动。这个空占位仅在键盘态撑住那一格，
+         让聚簇高度不变 → 顶部不动 → 光圈与提示原地不动。 -->
+    <div class="field-placeholder" aria-hidden="true"></div>
+
+    <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散）
+         必须在聚簇内做普通 flex 项（static），位置由排版决定 —— 这样它永远
+         夹在输入框与提示之间，不会与任何一层叠在一起。
+         注意：**不要**给它 fixed/absolute —— 一旦脱离文档流，它就不再参与
+         聚簇排版，会在矮屏上落到提示文字身上（曾用 fixed 修键盘位移，结果
+         引入了与提示重叠的排版事故）。 -->
+    <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
+      <span class="ring-wave"></span>
+      <span class="ring-wave"></span>
+      <span class="ring-wave"></span>
+    </button>
+
     <!-- 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
     <p class="opening-hint">
       <span>Ask once, ask true.</span>
       <span>Ask twice, the cards lie.</span>
     </p>
   </div>
-
-  <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散）
-       故意**放在 .ask-cluster 之外**：.ask-cluster 有 transform: translateX(-50%)，
-       会让 fixed 后代以它为包含块（百分比 bottom 按簇高算，键盘态簇高收缩就跟着漂）。
-       挪到 .opening 直属后 fixed 才真正相对视口，键盘全程不动。 -->
-  <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
-    <span class="ring-wave"></span>
-    <span class="ring-wave"></span>
-    <span class="ring-wave"></span>
-  </button>
 
   <p id="drawHint" class="opening-error"></p>
 </header>
