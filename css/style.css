@@ -53,10 +53,10 @@
   --y-zoom-label: 4.2%;   /* 放大态的金色身份标签 */
   --y-wheel-nav: 44.5%;   /* 滚筒左右切换三角形（与滚筒中线对齐） */
 
-  /* 键盘自适应：--vph = 锁定的布局视口高（JS 写入 px，键盘弹出时不变）；
-   * --kb = 键盘补偿量（JS 写入 px），只作用于输入区，主布局不动 */
+  /* 视口高度：直接用 CSS 原生的 svh（小视口高），不锁 px。
+   * 用 svh 而非 dvh —— dvh 会随地址栏伸缩实时变化，导致整屏布局在滑动时跳动；
+   * svh 取"地址栏展开时"的最小高，全程稳定，也不会产生滚动条。 */
   --vph: 100svh;
-  --kb: 0px;
 
   /* 节奏 */
   --gap-section: 104px;
@@ -449,15 +449,14 @@ body.orb-deleting .opening-orbs { touch-action: none; }
 
 /* 输入区：键盘弹出时上浮只作用于这里，且必须「脱离 flex 流」——
  * 否则 translateY 上浮会穿过上方问句 / 下方提示的文字（用户反馈的"输入被顶飞"）。
- * 键盘态（body.kb-open）下改为 fixed：bottom 锚定键盘顶边，
+ * 键盘态（body.kb-open）下改为 fixed：top 锚定在键盘顶边上方，
  * 于是问句 / 提示 / 光圈全部原地不动，只有输入框自己浮起来。
  * 非键盘态保持原来的 flex 项位置（position: relative）。 */
 .opening-field {
   position: relative;
   top: auto;
   left: auto;
-  transform: translateY(calc(-1 * var(--kb, 0px)));
-  transition: transform 0.45s cubic-bezier(0.33, 0, 0.2, 1), opacity 0.4s ease;
+  transition: opacity 0.4s ease;
   width: 100%;
   opacity: 0;
   pointer-events: auto;
@@ -465,13 +464,11 @@ body.orb-deleting .opening-orbs { touch-action: none; }
 
 /* 键盘态：脱离文档流，钉在键盘上方（内联 top/left/width 由 JS 写入）。
  * 用 top 定位而非 bottom —— fixed 的 top 相对视觉视口顶，键盘弹出不吃这个坐标，
- * 因此不会出现「bottom 被键盘顶起→再次位移」的双重偏移。
- * transform 清零，避免与旧的 --kb 位移叠加。 */
+ * 因此不会出现「bottom 被键盘顶起→再次位移」的双重偏移。 */
 body.kb-open .opening-field {
   position: fixed;
   inset: auto;                     /* 清零旧锚点，实际位置全由 JS 内联 top/left 决定 */
   z-index: 30;                     /* 高于牌命中区(10-20)，低于放大态(30+) */
-  transform: none;
   transition: opacity 0.4s ease;   /* 定位变化不做 transition，避免跟手漂移 */
 }
 

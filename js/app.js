@@ -1724,83 +1724,80 @@ function fitQuestion() {
  * 键盘弹出（宽不变、高骤缩）不触发 resize，只上浮输入区。
  * ============================================================ */
 
-const KB_MIN = 90;            // 高度缩水超过该值视为键盘弹出
-const KB_LIFT_MARGIN = 24;    // 输入区底边与键盘顶边的间距
-let vpLock = { w: window.innerWidth, h: window.innerHeight };
-let kbOn = false;
-let inputFocused = false;     // 统一焦点状态：true → 非输入元素暗淡，输入区+流光上浮
+/* ============================================================
+ * 软键盘自适应 —— 朴素版
+ * ============================================================
+ *
+ * 设计原则：**只用一个真相源**。
+ *   window.visualViewport 本身就会随键盘精确变化，直接读它、直接用它定位，
+ *   不需要任何"基线""锁定值""判定状态"这类派生量。
+ *
+ * 唯一需要的两个数：
+ *   vv.height    键盘弹起后会变小 → 输入框底边就贴在它上面
+ *   vv.offsetTop 视觉视口被滚动时用它修正（iOS 聚焦会把视口顶上去）
+ *
+ * 键盘是否弹起 = 「有输入焦点」+「视口确实比刚才矮」。
+ * 用「比刚才矮」而不是和 innerHeight 比 —— 后者与 vv.height 量纲不同
+ * （真机固有差 60~120px），一做减法就会误判：无键盘时以为键盘弹了，
+ * 收键盘后又永远收不掉。这是本项目历史上最折腾的一个坑。
+ *
+ * 状态只有三个 boolean，没有中间层：
+ *   kbOn  键盘态（CSS body.kb-open 驱动输入框 fixed）
+ *   focusOn 输入焦点（CSS body.input-focused 驱动整体压暗）
+ *   lifted 输入框是否已搬到 body 下
+ * ------------------------------------------------------------ */
 
-function lockViewport() {
-  vpLock = { w: window.innerWidth, h: window.innerHeight };
-  document.documentElement.style.setProperty('--vph', vpLock.h + 'px');
+const KB_MIN = 40;          // 视口比"刚才"矮超过这个值才算键盘（滤掉收键盘过程的水花）
+const KB_GAP = 24;          // 输入框底边与键盘顶边的间距
+const KB_TOP_MIN = 92;      // 输入框顶边距屏幕顶的最小值（避开标题/光球）
+
+let kbOn = false;           // 键盘态
+let focusOn = false;        // 输入焦点态
+let focusVvH = 0;           // 获得焦点那一刻的视口高（键盘高度就以它为参照）
+let fieldHome = null;       // 输入框原位（下一个兄弟节点）
+let moving = false;         // 搬家进行中：此时的 blur 是假 blur
+
+function vvH() {
+  const vv = window.visualViewport;
+  return vv ? vv.height : window.innerHeight;
+}
+function vvTop() {
+  const vv = window.visualViewport;
+  return vv ? vv.offsetTop : 0;
 }
 
-/* 统一焦点状态：输入框聚焦 → 非输入元素暗淡（由 CSS body.input-focused 驱动）；
- * 失焦 / 页面切换 → 复位。true→true / false→false 直接短路，反复点击不触发重复变化。 */
+/* 焦点态：CSS 靠 body.input-focused 把非输入元素压暗 */
 function setInputFocused(v) {
   v = !!v;
-  if (inputFocused === v) return;
-  inputFocused = v;
+  if (focusOn === v) return;
+  focusOn = v;
   document.body.classList.toggle('input-focused', v);
 }
 
-/* 键盘态复位：离开提问环节 / 返回开场 / 历史回看时必须调用。
- * 若不复位，输入框会带着 fixed 定位与内联 left/width/bottom 残留，
- * 返回后压在上层（用户反馈的"文字返回以后和背后元素重叠"）。 */
-let fieldHome = null;        // 输入框在聚簇里的原位置（下一个兄弟节点），搬家后凭它放回
-let fieldMoving = false;     // 搬家进行中：期间触发的 blur 不是真失焦，不据此复位键盘态
-
-function resetKeyboardState() {
-  kbOn = false;
-  document.body.classList.remove('kb-open');
-  restoreField();                    // 搬回聚簇原位（清内联定位也在这一步做）
-  document.documentElement.style.setProperty('--kb', '0px');
-}
-
-/* 键盘自适应：输入框在键盘态下「脱离 flex 流」——由 body.kb-open + 内联
- * left/width/top 直接钉到键盘上方，问句 / 提示 / 光圈全程不动。
- *
- * 坐标口径：fixed 的 top/left 是「相对视觉视口」的像素值。键盘顶边在视觉
- * 视口里的位置就是 vv.height，所以输入框底边贴 KB_LIFT_MARGIN 上方即：
- *     top = vv.height - KB_LIFT_MARGIN - fieldH
- * 再夹一层安全上限，避免多行时越过屏幕顶端。
- *
- * ⚠️ 关键：CSS 里祖先带 transform 会成为 fixed 后代的「包含块」——
- * .ask-cluster 有 translateX(-50%)，会把 fixed 的参照系从视口换成聚簇自身，
- * 导致 top/left 全部错位。因此键盘态必须把输入框移到 body 下（见 liftFieldOut），
- * 收起时再放回聚簇原位（见 restoreField）。 */
-const KB_TOP_SAFE = 92;      // 输入框顶边与屏幕顶的最小间距（避开顶部光球/标题）
-function liftFieldOut() {
+/* ---------- 搬家：脱离带 transform 的祖先，fixed 才以视口为参照 ----------
+ * .ask-cluster 有 translateX(-50%)，会让 fixed 后代以它为包含块 → top/left 全错。
+ * 所以键盘态把输入框挪到 body 下，收起时再放回。 */
+function liftField() {
   const field = el.openingField;
   if (!field || field.dataset.lifted === '1') return;
   if (!fieldHome) fieldHome = field.nextSibling;
-  const wasFocused = document.activeElement === el.question || document.activeElement === field;
-  /* 搬家会让聚焦元素失焦（DOM 移动的既有行为）→ 触发一次假 blur，用 flag 挡住。
-   *
-   * ⚠️ 搬完**必须无条件把焦点还给 input**（前提：搬之前焦点在输入区里）。
-   * 曾经的写法是「仅当 activeElement !== el.question 才 refocus」——这个判断是错的：
-   * 点输入框时 activeElement 本来**就是** el.question，条件恒为 false，永远不 refocus。
-   * 结果：焦点掉到 body 上 → 用户按键盘自带的「收起」键时 input 早就不在焦点，
-   * 不会触发 blur → 表现为「点键盘回收键无法收起，只能点键盘外面」
-   * （点键盘外面之所以有效，是因为兜底的 pointerdown 出口不看焦点）。
-   *
-   * 还焦点必须严格限定在「搬之前焦点就在输入区」的情况；
-   * 若是别的原因走进来（理论上不该有），抢焦点会造成关不掉的循环。 */
-  fieldMoving = true;
+  const hadFocus = document.activeElement === el.question;
+  moving = true;
   field.dataset.lifted = '1';
-  document.body.appendChild(field);         // 脱离 transform 祖先 → fixed 参照系回到视口
-  if (wasFocused && el.question) {
+  document.body.appendChild(field);
+  /* 搬家必然让 input 失焦，必须还回去 —— 否则用户按键盘自带收起键时
+   * input 已不在焦点，blur 不触发，键盘态就永久残留（"只能点键盘外面"）。 */
+  if (hadFocus && el.question) {
     try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ }
   }
-  /* fieldMoving 用宏任务复位：blur 是同步派发的，等焦点还回去并稳定后再放开 */
-  window.setTimeout(() => { fieldMoving = false; }, 0);
+  window.setTimeout(() => { moving = false; }, 0);
 }
 
-function restoreField() {
+function dropField() {
   const field = el.openingField;
   if (!field || field.dataset.lifted !== '1') return;
-  const wasFocused = document.activeElement === el.question;
-  fieldMoving = true;                        // 搬回同样会造成一次假 blur，挡住
+  const hadFocus = document.activeElement === el.question;
+  moving = true;
   delete field.dataset.lifted;
   const cluster = document.querySelector('.ask-cluster');
   if (cluster) cluster.insertBefore(field, fieldHome && fieldHome.parentNode === cluster ? fieldHome : null);
@@ -1809,155 +1806,124 @@ function restoreField() {
   field.style.left = '';
   field.style.width = '';
   field.style.top = '';
-  /* 只在「收起前确实还在输入」时还焦点；若收起本来就是失焦引起的（用户点了别处），
-   * 绝不能抢回焦点，否则点空白处会变成关不掉的循环。 */
-  if (wasFocused && el.question) { try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ } }
-  window.setTimeout(() => { fieldMoving = false; }, 0);
+  if (hadFocus && el.question) {
+    try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ }
+  }
+  window.setTimeout(() => { moving = false; }, 0);
 }
 
-function handleKeyboard() {
-  const vv = window.visualViewport;
-  const viewH = vv ? vv.height : window.innerHeight;      // 视觉视口可视高
-  const kb = Math.max(0, vpLock.h - viewH - (vv ? vv.offsetTop : 0));
-  const on = kb > KB_MIN;
-  kbOn = on;
+/* 键盘态复位：离开提问 / 返回开场 / 历史回看 / 失焦 都要调，
+ * 否则 fixed 与内联定位残留 → 返回后压层。 */
+function resetKeyboardState() {
+  kbOn = false;
+  focusVvH = 0;
+  document.body.classList.remove('kb-open');
+  dropField();
+}
 
+/* ---------- 唯一的响应函数：视口变了就重算 ----------
+ * 键盘高度用「有焦点那一刻的视口高」作参照（focusVvH），
+ * 而不是拿上一帧做差分 —— 差分会被中途的无关 resize 抹平：
+ * focus 事件里会先调一次 syncKeyboard，lastVvH 立刻被更新成"键盘还没弹"的高度，
+ * 等键盘真的弹起触发 vv.resize 时，差值已经归零，键盘态就再也进不去。
+ * 参照值只在获得焦点那一刻重新采样，键盘升降全程沿用同一个数，稳定可靠。 */
+
+function syncKeyboard() {
   const field = el.openingField;
-  /* 键盘态开关：CSS 靠 body.kb-open 把 .opening-field 切成 fixed */
+  if (!field) return;
+  const h = vvH();
+
+  /* 有焦点：键盘高度 = 参照值 - 当前值。无焦点：键盘必然收起。 */
+  const kb = focusOn && focusVvH ? Math.max(0, focusVvH - h - vvTop()) : 0;
+  const on = kb > KB_MIN;
+
+  kbOn = on;
   document.body.classList.toggle('kb-open', on);
 
-  if (!on || !field) {
-    document.documentElement.style.setProperty('--kb', '0px');
-    restoreField();
-    return;
-  }
+  if (!on) { dropField(); return; }
 
-  liftFieldOut();
-
-  /* 水平位置：与开场聚簇等宽居中（fixed 后不再继承 flex 的居中）。
-   * 搬家后先量一次宽度 —— 脱离 flex 后 width:100% 会变成 body 宽，必须显式钉住。 */
-  const restW = Math.min(vpLock.w * 0.8, 520);
-  const restLeft = Math.max(0, (vpLock.w - restW) / 2);
+  liftField();
+  const restW = Math.min(window.innerWidth * 0.8, 520);
   field.style.width = Math.round(restW) + 'px';
-  field.style.left = Math.round(restLeft) + 'px';
-
+  field.style.left = Math.round(Math.max(0, (window.innerWidth - restW) / 2)) + 'px';
   const fieldH = field.offsetHeight || 78;
-  let top = viewH - KB_LIFT_MARGIN - fieldH;               // 底边贴键盘上方
-  if (top < KB_TOP_SAFE) top = KB_TOP_SAFE;                // 多行时不许越出屏幕顶
+  /* fixed 的 top 相对视觉视口：底边贴键盘上方，再减去视口被滚动的偏移 */
+  const top = Math.max(KB_TOP_MIN, h + vvTop() - KB_GAP - fieldH);
   field.style.top = Math.round(top) + 'px';
-
-  document.documentElement.style.setProperty('--kb', '0px');   // fixed 态不再用 --kb 位移
   try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
 }
 
-/* 视口变化分三类，处理方式完全不同：
- *
- * 1) 键盘弹出：宽不变、高骤缩（> KB_MIN）。主布局**不许动**（--vph 保持锁定），
- *    只上浮输入区 —— 否则画布与牌会跟着挤压。
- * 2) 地址栏伸 / 缩：宽不变、高小幅变化（< KB_MIN）。这是**真 resize**，
- *    必须重锁 --vph，否则文档高固定为「打开页面时的最大高」，
- *    只要真机视口掉到锁定值以下（iOS 地址栏展开 / 底部手势条遮挡），
- *    文档就比视口高 → 右侧竖直滚动条闪现（用户报的"页面大小在抽搐"）。
- * 3) 旋转 / 分屏：宽变了 → 重锁 + 重算布局 + 3D 重排。
- *
- * 判定「是否键盘」不能只看高度差：键盘弹出时焦点必在输入框上，
- * 地址栏伸缩时通常没有输入焦点。用 focus 状态做二次确认，避免把
- * 小幅地址栏变化误判成键盘（那会导致 --vph 永不更新 → 滚动条抖动）。 */
-function onViewportChange() {
+/* 画布尺寸：只在窗口宽高真变了时才重排（键盘弹出不动画布） */
+let lastW = 0;
+let lastH = 0;
+function syncCanvas() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const widthSame = Math.abs(w - vpLock.w) <= 2;
-  /* 键盘：高度骤缩 + 输入框处于焦点态（keyboard 弹起必然伴随 focus） */
-  const likelyKeyboard = widthSame && h < vpLock.h - KB_MIN && (inputFocused || kbOn);
-
-  if (likelyKeyboard) {
-    handleKeyboard();
-    return;
-  }
-
-  lockViewport();
-  handleKeyboard();
-  setupQuestionBox();
+  if (w === lastW && h === lastH) return;
+  lastW = w;
+  lastH = h;
   if (scene && scene.ok) scene.resize();
 }
 
+function onViewportChange() {
+  syncKeyboard();
+  /* 输入框不在焦点上时窗口变化一定是地址栏/旋转，不是键盘 → 同步画布。
+   * 键盘弹出（有焦点）时画布保持不动，避免牌被挤压。 */
+  if (!focusOn) syncCanvas();
+}
+
 function setupViewport() {
-  lockViewport();
-  handleKeyboard();
-  setupQuestionBox();
+  lastW = window.innerWidth;
+  lastH = window.innerHeight;
+  syncKeyboard();
 
   window.addEventListener('resize', onViewportChange);
-  window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 240));
+  window.addEventListener('orientationchange', () => window.setTimeout(onViewportChange, 240));
 
   const vv = window.visualViewport;
   if (vv) {
     vv.addEventListener('resize', onViewportChange);
-    /* iOS 聚焦输入框时会把视觉视口滚到输入框处 —— 键盘开着时强制回顶 */
+    /* iOS 聚焦输入框会把视觉视口滚上去 —— 键盘开着时强制回顶 */
     vv.addEventListener('scroll', () => { if (kbOn) window.scrollTo(0, 0); });
   }
-  /* 焦点状态统一驱动暗淡：聚焦 → 非输入元素暗淡；失焦 → 复原。
-   * 键盘弹出时的上浮由 handleKeyboard 处理，这里只管焦点状态。 */
-  if (el.question) {
-    el.question.addEventListener('focus', () => {
-      try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
-      setInputFocused(true);
-    });
-    el.question.addEventListener('blur', () => {
-      if (fieldMoving) return;     // 键盘态搬家导致的假 blur：不是真失焦，别复位
-      setInputFocused(false);
-      resetKeyboardState();        // 失焦 = 键盘收起：同步清掉键盘态定位
-    });
-  }
 
-  /* 收起键盘的兜底出口。
-   * 为什么必须有：键盘态下输入框被搬到了 body 下，聚焦可能已不在它身上
-   * （DOM 移动的副作用），此时 blur 不会再触发 —— 若只靠 blur 收起，
-   * 用户体验就是「输入框点开后关不掉」。因此额外提供两个明确出口：
-   *   ① 按住输入框以外的任何位置（pointerdown 在输入框外）→ 失焦收起
-   *   ② Escape 键 → 失焦收起
-   * 两者都只在键盘态/聚焦态下生效，不干扰其他交互。
-   *
-   * ⚠️ 不能只调 el.question.blur()：若焦点已不在 input 上（搬家副作用残留），
-   * blur() 是空操作，键盘收不掉。所以「先无条件复位 UI 状态」，
-   * blur() 只作为额外保险（触发浏览器原生收键盘）。 */
-  const blurIfTyping = () => {
-    if (!kbOn && !inputFocused) return;
+  if (!el.question) return;
+
+  el.question.addEventListener('focus', () => {
+    try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
+    /* 采样参照值：这一刻键盘通常还没弹（或刚弹），取当前视口高作为"无键盘高度"。
+     * 若这一刻键盘已弹起（快速切换焦点），focusVvH 会偏小，键盘高度算得偏小、
+     * 可能落在阈值以下 —— 此时 vv.resize 会紧接着再来一次，且参照值越小越保险
+     * （宁可判不出键盘，也不要误判成键盘后收不掉）。 */
+    if (!focusOn) focusVvH = vvH();
+    setInputFocused(true);
+    syncKeyboard();
+  });
+
+  el.question.addEventListener('blur', () => {
+    if (moving) return;                 // 搬家造成的假 blur
+    setInputFocused(false);
+    resetKeyboardState();
+  });
+
+  /* 兜底收起：真机上「键盘回收键 / 系统返回键」可能让 input 保持焦点、
+   * 不发 blur，只把 vv.height 还回去。此时上面的链路一个都不会触发，
+   * 所以再加一条「点输入框以外」的出口（Escape 一起）。
+   * 注意：不复位焦点状态以外的东西，交给 resetKeyboardState 统一处理。 */
+  const closeIfTyping = () => {
+    if (!kbOn && !focusOn) return;
     if (el.question) { try { el.question.blur(); } catch (e) { /* 忽略 */ } }
     setInputFocused(false);
     resetKeyboardState();
   };
   document.addEventListener('pointerdown', (e) => {
-    if (!kbOn && !inputFocused) return;
-    if (el.openingField && el.openingField.contains(e.target)) return;   // 点输入区自身：不收起
-    blurIfTyping();
+    if (!kbOn && !focusOn) return;
+    if (el.openingField && el.openingField.contains(e.target)) return;
+    closeIfTyping();
   }, true);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') blurIfTyping();
+    if (e.key === 'Escape') closeIfTyping();
   });
-
-  /* 「键盘回收」出口：软键盘自带的收起键 / 系统返回键收起键盘时，
-   * 视觉视口会恢复高度 —— 这是唯一的可靠信号。
-   *
-   * 为什么不能只信 blur：真机上输入框被搬到 body 下后，某些输入法收起键盘时
-   * input 保持焦点、**不发 blur**，只把 visualViewport 恢复。此时若只监听 blur，
-   * 键盘态（fixed 定位 + body.kb-open）就永远残留 —— 用户报的
-   * 「点键盘回收键无法收起，只能点键盘外面」正是此形态。
-   *
-   * ⚠️ 定时器必须**常驻**，不能自我清理：早期写法是「kbOn 为 false 就 clearInterval」，
-   * 但本函数在页面加载时即启动，那时 kbOn 恒为 false → 定时器第一轮就自杀，
-   * 之后再不会运行（这就是兜底失效的原因）。正确做法是常驻轮询、
-   * 内部只在 kbOn 为真时才判视口，开销可忽略（220ms 一次的两个属性读取）。 */
-  window.setInterval(() => {
-    if (!kbOn) return;                       // 非键盘态：什么都不做，但定时器继续活着
-    const vv2 = window.visualViewport;
-    const viewH = vv2 ? vv2.height : window.innerHeight;
-    const kbNow = Math.max(0, vpLock.h - viewH - (vv2 ? vv2.offsetTop : 0));
-    if (kbNow <= KB_MIN) {
-      /* 视口已恢复但状态仍标记键盘开着 → 键盘真的收了，强制复位 */
-      setInputFocused(false);
-      resetKeyboardState();
-    }
-  }, 220);
 }
 
 /* ============================================================
