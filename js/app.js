@@ -471,29 +471,42 @@ function openFan() {
  * 状态 1（开场）、状态 3+（抽牌后）、历史回看里都必须完全隐藏（含 visibility，
  * 否则透明输入框会挡住底下牌背的点击）。 */
 function setAskVisible(on, instant) {
-  const targets = [el.openingQuestion, el.openingField, el.openingHint, el.ringBtn].filter(Boolean);
+  const targets = [el.openingQuestion, el.openingHint, el.ringBtn].filter(Boolean);
   const gsap = window.gsap;
   if (on) {
     targets.forEach((n) => { n.style.visibility = ''; });
+    if (el.openingField) el.openingField.style.visibility = '';
     if (!gsap || REDUCED || instant) {
       targets.forEach((n) => { n.style.opacity = '1'; n.style.transform = 'none'; });
+      if (el.openingField) el.openingField.style.opacity = '1';
       focusOnDesktop();
       return;
     }
+    /* 输入框只动 opacity：transform 留给键盘上浮（CSS var --kb）接管 */
     gsap.fromTo(targets,
       { opacity: 0, y: 16 },
-      { opacity: 1, y: 0, duration: 1.0, stagger: 0.16, ease: 'power3.out', delay: 0.8, onComplete: focusOnDesktop });
+      { opacity: 1, y: 0, duration: 1.0, stagger: 0.16, ease: 'power3.out', delay: 0.55 });
+    gsap.fromTo(el.openingField,
+      { opacity: 0 },
+      { opacity: 1, duration: 1.0, ease: 'power3.out', delay: 0.71, onComplete: focusOnDesktop });
     return;
   }
   if (instant || !gsap || REDUCED) {
     targets.forEach((n) => { n.style.opacity = '0'; n.style.visibility = 'hidden'; });
+    if (el.openingField) { el.openingField.style.opacity = '0'; el.openingField.style.visibility = 'hidden'; }
     return;
   }
   return new Promise((res) => {
     gsap.to(targets, {
       opacity: 0, y: -10, duration: 0.6, stagger: 0.06, ease: 'power2.in',
-      onComplete: () => { targets.forEach((n) => { n.style.visibility = 'hidden'; }); res(); },
+      onComplete: () => { targets.forEach((n) => { n.style.visibility = 'hidden'; n.style.transform = ''; }); res(); },
     });
+    if (el.openingField) {
+      gsap.to(el.openingField, {
+        opacity: 0, duration: 0.6, ease: 'power2.in',
+        onComplete: () => { el.openingField.style.visibility = 'hidden'; },
+      });
+    }
   });
 }
 
@@ -1328,6 +1341,82 @@ function tickOverlay() {
 }
 
 /* ============================================================
+ * 视口锁定 + 键盘自适应（visualViewport）
+ * 主布局与 3D 画布的高度锁定在「无键盘视口高」（--vph），
+ * 键盘弹出（宽不变、高骤缩）不触发 resize，只上浮输入区。
+ * ============================================================ */
+
+const KB_MIN = 90;            // 高度缩水超过该值视为键盘弹出
+const KB_LIFT_MARGIN = 24;    // 输入区底边与键盘顶边的间距
+let vpLock = { w: window.innerWidth, h: window.innerHeight };
+let fieldRestBottom = 0;      // 输入区静止时的底边（含流光余量）
+let kbOn = false;
+
+function lockViewport() {
+  vpLock = { w: window.innerWidth, h: window.innerHeight };
+  document.documentElement.style.setProperty('--vph', vpLock.h + 'px');
+}
+
+/* 量输入区静止底边（transform 不影响布局，但 rect 含当前位移，需在 --kb=0 时量） */
+function measureField() {
+  if (!el.openingField) return;
+  const prev = el.openingField.getBoundingClientRect();
+  fieldRestBottom = prev.bottom + 20;   // + 流光余量
+}
+
+function handleKeyboard() {
+  const vv = window.visualViewport;
+  let kb = 0;
+  if (vv) kb = Math.max(0, vpLock.h - vv.height - vv.offsetTop);
+  const on = kb > KB_MIN;
+  let lift = 0;
+  if (on && fieldRestBottom) {
+    const kbTop = vpLock.h - kb;
+    lift = Math.max(0, Math.min(kb, fieldRestBottom + KB_LIFT_MARGIN - kbTop));
+  }
+  kbOn = on;
+  document.documentElement.style.setProperty('--kb', lift.toFixed(1) + 'px');
+  document.body.classList.toggle('kb-on', on);
+  if (on) { try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ } }
+}
+
+/* 键盘缩水（宽同高缩）不重算布局；真实 resize（旋转/分屏）才更新锁定 */
+function onViewportChange() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (h < vpLock.h - KB_MIN && Math.abs(w - vpLock.w) <= 2) {
+    handleKeyboard();
+    return;
+  }
+  lockViewport();
+  measureField();
+  handleKeyboard();
+  if (scene && scene.ok) scene.resize();
+}
+
+function setupViewport() {
+  lockViewport();
+  measureField();
+  handleKeyboard();
+
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 240));
+
+  const vv = window.visualViewport;
+  if (vv) {
+    vv.addEventListener('resize', onViewportChange);
+    /* iOS 聚焦输入框时会把视觉视口滚到输入框处 —— 键盘开着时强制回顶 */
+    vv.addEventListener('scroll', () => { if (kbOn) window.scrollTo(0, 0); });
+  }
+  /* 聚焦瞬间阻止浏览器自动滚动（双保险） */
+  if (el.question) {
+    el.question.addEventListener('focus', () => {
+      try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
+    });
+  }
+}
+
+/* ============================================================
  * 初始化
  * ============================================================ */
 
@@ -1446,13 +1535,10 @@ function init() {
     wheelRelease(0);
   });
 
-  window.addEventListener('resize', () => { if (scene && scene.ok) scene.resize(); });
-  window.addEventListener('orientationchange', () => {
-    setTimeout(() => { if (scene && scene.ok) scene.resize(); }, 240);
-  });
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => { if (scene && scene.ok) scene.resize(); });
-  }
+  /* ---- 视口锁定 + 键盘自适应 ----
+   * 键盘弹出（宽不变、高骤缩）时：不 resize 场景、不挤布局，
+   * 只把输入区 translateY 到键盘上方、其余元素淡化压暗；键盘收起复原。 */
+  setupViewport();
 
   /* ---- 首屏 ---- */
   const gsap = window.gsap;

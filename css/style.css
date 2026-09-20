@@ -53,6 +53,11 @@
   --y-wheel-label: 4.6%;  /* 滚筒居中标签（牌上方固定位置） */
   --y-zoom-label: 4.2%;   /* 放大态的金色身份标签 */
 
+  /* 键盘自适应：--vph = 锁定的布局视口高（JS 写入 px，键盘弹出时不变）；
+   * --kb = 键盘补偿量（JS 写入 px），只作用于输入区，主布局不动 */
+  --vph: 100svh;
+  --kb: 0px;
+
   /* 节奏 */
   --gap-section: 104px;
   --gap-section-sm: 76px;
@@ -65,6 +70,7 @@
 html {
   -webkit-text-size-adjust: 100%;
   scroll-behavior: smooth;
+  overscroll-behavior: none;      /* 键盘弹出时禁止浏览器默认滚动回弹 */
 }
 
 body {
@@ -76,6 +82,7 @@ body {
   line-height: 1.85;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  overscroll-behavior: none;
   touch-action: pan-y;   /* 横向拖动留给滚筒，纵向留给上滑手势 */
 }
 
@@ -87,9 +94,13 @@ body:not(.has-draw) .site-footer { display: none; }
    ============================================================ */
 .gl-layer {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--vph);       /* 锁定视口高：键盘弹出时画布与主布局都不挤压 */
   z-index: 0;
   pointer-events: none;
+  transition: filter 0.45s ease;
 }
 
 .gl-layer canvas {
@@ -143,8 +154,28 @@ body:not(.has-draw) .site-footer { display: none; }
 .opening {
   position: relative;
   z-index: 1;
-  height: 100vh;
-  height: 100svh;
+  height: var(--vph);       /* 锁定视口高（JS 写入 px）：键盘弹出时布局不挤压 */
+}
+
+/* ---------- 键盘自适应（visualViewport） ----------
+ * 键盘弹出时：非输入元素整体淡化压暗（filter，不动布局）；
+ * 输入区（输入框 + 流光）用 transform 上浮到键盘上方（见 .opening-field）；
+ * 键盘收起全部复原。全程只动 transform / opacity / filter。 */
+.opening-title,
+.opening-orbs,
+.opening-question,
+.opening-hint,
+.opening-ring {
+  transition: filter 0.45s ease;
+}
+
+body.kb-on .gl-layer,
+body.kb-on .opening-title,
+body.kb-on .opening-orbs,
+body.kb-on .opening-question,
+body.kb-on .opening-hint,
+body.kb-on .opening-ring {
+  filter: brightness(0.6) opacity(0.38);
 }
 
 /* ---------- 0. 顶部光球展示（0 个则不显示；1 个居中；2/3 个居中对称） ---------- */
@@ -260,11 +291,13 @@ body:not(.has-draw) .site-footer { display: none; }
 }
 
 /* ---------- 5. 无框输入框 ---------- */
+/* 输入区：上浮只作用于这里（含流光），键盘弹出时 translateY 到键盘上方 */
 .opening-field {
   position: absolute;
   top: var(--y-field);
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, calc(-1 * var(--kb, 0px)));
+  transition: transform 0.45s cubic-bezier(0.33, 0, 0.2, 1);
   width: min(80vw, 520px);
   opacity: 0;
 }
