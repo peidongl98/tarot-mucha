@@ -414,6 +414,21 @@ function dimOrbs(on) {
   el.orbRow.classList.toggle('is-dim', !!on);
 }
 
+/* 光球显隐：只在首页（OPENING）显示，离开即淡出；
+ * 其他状态（ASK / 抽牌 / 看牌 / 解读 / 历史回看）一律隐藏。 */
+function setOrbsVisible(on) {
+  if (!el.orbRow) return;
+  if (on) {
+    if (el.orbRow.childElementCount === 0) { el.orbRow.hidden = true; return; }
+    el.orbRow.hidden = false;
+    el.orbRow.classList.remove('is-dim', 'is-hidden');
+    el.orbRow.style.opacity = '1';
+  } else {
+    el.orbRow.classList.remove('is-dim');
+    el.orbRow.classList.add('is-hidden');
+  }
+}
+
 /* 最旧的光球炸成星光后消失 */
 async function burstOldestOrb() {
   const first = el.orbRow ? el.orbRow.querySelector('.orb') : null;
@@ -461,6 +476,7 @@ function openFan() {
   else fadeTitle();
   showAskArea();
   state = S.ASK;
+  setOrbsVisible(false);          // 离开首页：光球淡出
 }
 
 /* 问句 / 输入 / 提示 / 光圈：只在「状态 2（点牌背后）」出现。
@@ -634,9 +650,9 @@ async function startDraw() {
   const cards = drawThree();
   lastReading = cards;
 
-  // ① 最旧光球炸成星光消失；② 剩余光球变黯淡 + 缓慢漂浮
-  const hadOrb = await burstOldestOrb();
-  if (hadOrb) dimOrbs(true);
+  // ① 最旧光球炸成星光消失；② 剩余光球淡出（光球只在首页显示）
+  await burstOldestOrb();
+  setOrbsVisible(false);
 
   // ③ 问句 / 输入 / 提示 / 光圈淡出
   const fade = hideAskArea();
@@ -755,6 +771,7 @@ function showSink(on) {
 function enterReading() {
   if (state !== S.ROW) return;
   state = S.READING;
+  setOrbsVisible(false);          // 进入解读：光球隐藏
   zoomIndex = -1;
   hideMeaning();
   showSink(false);
@@ -1096,7 +1113,7 @@ async function resetOpening(opts) {
 
   // 光球队列：新光球从右侧挤入，已有光球被挤动
   renderOrbs(records, { animateNew: !!o.animateNew, fadeIn: false });
-  el.orbRow.style.opacity = '1';
+  setOrbsVisible(true);            // 回到首页：光球重新出现
 
   state = S.OPENING;
 }
@@ -1126,6 +1143,7 @@ async function restoreRecord(rec) {
   el.question.value = lastQuestion;
   setInputLocked(true);
   setInputFocused(false);          // 历史回看：聚焦态复位，避免暗淡残留
+  setOrbsVisible(false);          // 历史回看：光球隐藏
   syncRing();
 
   deckShown = false;

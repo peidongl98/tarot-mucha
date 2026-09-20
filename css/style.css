@@ -196,6 +196,13 @@ body.input-focused .opening-ring {
 
 .opening-orbs[hidden] { display: none; }
 
+/* 离开首页：光球整体淡出（仅顶部固定视图之外一律隐藏） */
+.opening-orbs.is-hidden {
+  transition: opacity .45s ease;
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
 /* 点击容差：光球本体之外再留一点可点面积 */
 .orb { box-sizing: content-box; padding: 4px; margin: -4px; }
 
