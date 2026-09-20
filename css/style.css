@@ -740,7 +740,7 @@ body.no-3d .card-hit img { visibility: visible; }
   top: calc(var(--y-wheel-nav) - 26px);
   width: 40px;
   height: 52px;
-  z-index: 6;
+  z-index: 25;              /* 必须高于牌命中区(10-20)、低于放大态(30) */
   padding: 0;
   background: none;
   border: 0;
