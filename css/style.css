@@ -1073,30 +1073,80 @@ body.no-3d .card-hit img { visibility: visible; }
 .ai-text .ai-note-en { font-family: var(--font-display); letter-spacing: 0.06em; }
 .ai-text .ai-error { color: #E0C9A6; }
 
-/* 流式增量态：单个 <p> 承载全部文本，pre-wrap 保留模型换行；
- * 末尾跟一个呼吸光标，落字时不做任何位移动画（避免抖动）。 */
-.ai-text.streaming { display: flex; align-items: flex-start; justify-content: center; }
+/* ---------- 流式增量态 ----------
+ * 与终稿严格同源：外层复用 .ai-group-en / .ai-group-cn 的字体规则
+ * （英文衬线小字淡色、中文无衬线大字亮色），这里只补流式特有部分，
+ * 因此「流式看到的字形」== 「终稿字形」，不会再出现两套字体。
+ *
+ * 浮现而非打字：每个新字符是一个 <i class="ai-fade">，
+ * 入场只做 opacity + blur + 轻微上浮 —— 像从雾里浮出来，不是光标敲出来。 */
+.ai-text.streaming .ai-group-en,
+.ai-text.streaming .ai-group-cn { margin: 0 0 18px; }
 
-.ai-text .ai-stream {
+.ai-text.streaming .ai-stream-en,
+.ai-text.streaming .ai-stream-cn {
   margin: 0;
-  white-space: pre-wrap;
+  white-space: pre-wrap;        /* 保留模型换行 */
   word-break: break-word;
 }
 
-.ai-text.streaming .ai-stream::after {
+/* 英文段：继承终稿 .ai-group-en p 的衬线/字号/字色 */
+.ai-text.streaming .ai-stream-en {
+  font-family: var(--font-display);
+  font-size: clamp(12.5px, 1.32vw, 14px);
+  font-weight: 400;
+  letter-spacing: 0.045em;
+  line-height: 1.9;
+  color: #AFA693;
+}
+
+/* 中文段：继承终稿 .ai-group-cn p 的系统栈/字号/字色 */
+.ai-text.streaming .ai-stream-cn {
+  font-family: var(--font-body);
+  font-size: clamp(14px, 1.5vw, 15.5px);
+  letter-spacing: 0.02em;
+  line-height: 1.78;
+  color: #E4DED0;
+}
+
+.ai-text.streaming .ai-stream-en:empty,
+.ai-text.streaming .ai-stream-cn:empty { display: none; }
+
+/* 逐字浮现：短、柔、无位移感 */
+.ai-text .ai-fade {
+  font-style: inherit;
+  opacity: 0;
+  filter: blur(6px);
+  animation: aiFadeIn 1.05s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes aiFadeIn {
+  0%   { opacity: 0; filter: blur(6px); }
+  55%  { opacity: 0.75; filter: blur(1.6px); }
+  100% { opacity: 1; filter: blur(0); }
+}
+
+/* 流式期间末尾光标（中文段尾），提示还在生成 */
+.ai-text.streaming .ai-stream-cn::after,
+.ai-text.streaming .ai-stream-en:only-child::after {
   content: '';
   display: inline-block;
-  width: 0.5em;
+  width: 0.42em;
   height: 1em;
-  margin-left: 2px;
+  margin-left: 3px;
   vertical-align: -0.14em;
-  background: linear-gradient(180deg, rgba(233, 207, 152, 0.9), rgba(233, 207, 152, 0.15));
-  animation: aiCaret 1.15s ease-in-out infinite;
+  background: linear-gradient(180deg, rgba(233, 207, 152, 0.85), rgba(233, 207, 152, 0.10));
+  animation: aiCaret 1.25s ease-in-out infinite;
 }
 
 @keyframes aiCaret {
-  0%, 45% { opacity: 0.85; }
-  55%, 100% { opacity: 0.12; }
+  0%, 45% { opacity: 0.8; }
+  55%, 100% { opacity: 0.10; }
+}
+
+/* 无障碍：减少动态时不做逐字浮现，直接显示 */
+@media (prefers-reduced-motion: reduce) {
+  .ai-text .ai-fade { opacity: 1; filter: none; animation: none; }
 }
 
 /* ---------- 中英双语分组：英文在上（辅助），中文在下（主） ---------- */

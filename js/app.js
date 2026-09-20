@@ -1171,17 +1171,30 @@ function playAiRipple() {
 }
 
 function showAiText(text, streaming) {
-  /* 流式增量：用单个 <p> 承载纯文本、pre-wrap 保留换行。
-   * 不走 splitReading 分段 + 逐段动画——每帧重排会抖动，且滚动会跳。
-   * 流结束后再调一次本函数（streaming=false）做终稿完整排版。 */
+  /* 流式增量：中英分流到两个容器，用与终稿完全相同的字体规则渲染，
+   * 保证「流式看到的字形」与「终稿字形」是同一套（用户反馈的不统一问题）。
+   * 不做逐帧重排动画（会抖动），改为每个新字符单独淡入 → 视觉上是"浮现"而非"打字"。 */
   if (streaming) {
     el.aiText.classList.add('streaming');
-    el.aiText.textContent = '';
-    const p = elNew('p', 'ai-stream', text);
-    el.aiText.appendChild(p);
-    el.aiText.classList.add('is-on');
+    if (!aiStreamEls) {
+      el.aiText.textContent = '';
+      const gEn = elNew('div', 'ai-group ai-group-en');
+      const gCn = elNew('div', 'ai-group ai-group-cn');
+      const pEn = elNew('p', 'ai-en ai-stream-en');
+      const pCn = elNew('p', 'ai-stream-cn');
+      gEn.appendChild(pEn);
+      gCn.appendChild(pCn);
+      el.aiText.appendChild(gEn);
+      el.aiText.appendChild(gCn);
+      aiStreamEls = { pEn, pCn, en: '', cn: '' };
+      el.aiText.classList.add('is-on');
+    }
+    /* 把新增文本按字符类型追加到对应容器（英文段 / 中文段），并给新字符包一层淡入。
+     * 已有字符不动 → 不触发整段重排，滚动位置稳定。 */
+    appendStream(aiStreamEls, text);
     return;
   }
+  aiStreamEls = null;
   el.aiText.classList.remove('streaming');
 
   const r = splitReading(text);
@@ -1216,6 +1229,56 @@ function showAiText(text, streaming) {
   window.setTimeout(() => {
     if (!aiBusy) setAiRingVisible(false);   // 期间若重新发起解读，不抢状态
   }, totalMs);
+}
+
+/* 流式字符分流状态：{ pEn, pCn, en, cn } */
+let aiStreamEls = null;
+
+/* 逐字符浮现：把新字符包进 <i> 并加 CSS 动画，
+ * 视觉上是"从雾里浮出来"而不是"被敲出来"。
+ * 每帧最多渲染 FADE_MAX 个新字符，避免一次涌入时整屏闪。 */
+const FADE_MAX = 14;
+
+function appendStream(els, fullText) {
+  /* 首次以英文开头、之后遇中文切到中文段；用"首个中文字符"作为分界 */
+  const splitAt = (() => {
+    const m = fullText.search(/[\u4e00-\u9fff]/);
+    return m < 0 ? fullText.length : m;
+  })();
+  const enPart = fullText.slice(0, splitAt);
+  const cnPart = splitAt < fullText.length ? fullText.slice(splitAt) : '';
+
+  if (enPart.length > els.en.length) {
+    const add = enPart.slice(els.en.length);
+    els.en = enPart;
+    pushFaded(els.pEn, add);
+  }
+  if (cnPart.length > els.cn.length) {
+    const add = cnPart.slice(els.cn.length);
+    els.cn = cnPart;
+    pushFaded(els.pCn, add);
+  }
+}
+
+/* 把一段新增文本逐字符包 <i> 追加（保留换行 → 用 <br>） */
+function pushFaded(node, chunk) {
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i];
+    if (ch === '\n') { frag.appendChild(document.createElement('br')); continue; }
+    const s = document.createElement('i');
+    s.className = 'ai-fade';
+    s.textContent = ch;
+    frag.appendChild(s);
+  }
+  node.appendChild(frag);
+  /* 只保留最近若干字符带入场动画类，避免 DOM 上堆积几十万个动画节点 */
+  const kids = node.children;
+  const keep = 40;
+  for (let i = Math.max(0, kids.length - keep - 8); i < kids.length - keep; i++) {
+    const n = kids[i];
+    if (n.classList && n.classList.contains('ai-fade')) n.classList.remove('ai-fade');
+  }
 }
 
 function showAiError(msg) {
