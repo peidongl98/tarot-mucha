@@ -180,19 +180,27 @@ body.input-focused .opening-ring {
   filter: brightness(0.6) opacity(0.38);
 }
 
-/* ---------- 0. 顶部光球展示（0 个则不显示；1 个居中；2/3 个居中对称） ---------- */
+/* ---------- 0. 顶部光球展示（0 个则不显示；少则居中；多则横向滚动） ---------- */
 .opening-orbs {
   position: absolute;
   top: var(--y-orbs);
   left: 0;
   right: 0;
+  max-width: 92vw;
+  margin: 0 auto;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;   /* 超出宽度时左对齐可滚动，不裁掉左侧 */
   gap: var(--orb-gap);
   height: var(--orb-size);
   opacity: 0;                 /* 由 JS 淡入 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;      /* Firefox 隐藏滚动条 */
+  -ms-overflow-style: none;
 }
+.opening-orbs::-webkit-scrollbar { display: none; }   /* WebKit 隐藏滚动条 */
 
 .opening-orbs[hidden] { display: none; }
 

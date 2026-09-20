@@ -27,9 +27,10 @@ const MAX_QUESTION_LEN = 200;
 const POSITIONS = ['Past', 'Present', 'Future'];
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-/* 顶部光球：最多 3 个，从左到右 = 最旧 → 最新 */
-const ORB_MAX = 3;
+/* 顶部光球：本地最多存 ORB_MAX 条（突破旧 3 条上限）；云端 D1 同步同一上限 */
+const ORB_MAX = 50;
 const ORB_KEY = 'tarot_orbs';
+const DEVICE_KEY = 'tarot_device_id';   // 匿名设备标识，用于云端按设备隔离记录
 /* 更早版本用 localStorage 存抽牌历史列表，那套 UI 已移除；顺手清掉遗留键 */
 const LEGACY_KEY = 'tarot_history';
 
@@ -344,6 +345,64 @@ function writeOrbs(list) {
   try { localStorage.setItem(ORB_KEY, JSON.stringify(list)); } catch (e) { /* 忽略 */ }
 }
 
+/* 匿名设备标识：本地生成一次，存 localStorage；云端按此隔离记录，无需登录 */
+function getDeviceId() {
+  let id = '';
+  try { id = localStorage.getItem(DEVICE_KEY) || ''; } catch (e) { /* ignore */ }
+  if (!id) {
+    try {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : ('d-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+    } catch (e) { id = 'd-' + Date.now() + '-' + Math.random().toString(16).slice(2); }
+    try { localStorage.setItem(DEVICE_KEY, id); } catch (e) { /* ignore */ }
+  }
+  return id;
+}
+
+/* 云端同步：全部 best-effort、fire-and-forget，失败静默回退 localStorage。
+ * 未配置 D1 绑定（env.DB 为空）时 /api/orbs 返回 backend:false，调用方据此忽略。 */
+const ORBS_API = '/api/orbs';
+
+function cloudPush(rec) {
+  if (!rec || !rec.at || !Array.isArray(rec.cards) || rec.cards.length !== 3) return;
+  const payload = {
+    device_id: getDeviceId(),
+    at: rec.at,
+    question: rec.question || '',
+    cards: rec.cards,
+    reading: rec.reading || '',
+  };
+  try {
+    fetch(ORBS_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (e) { /* 忽略：本地优先 */ }
+}
+
+function cloudDelete(at) {
+  if (!at) return;
+  const url = ORBS_API + '?device_id=' + encodeURIComponent(getDeviceId()) +
+    '&at=' + encodeURIComponent(String(at));
+  try {
+    fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+  } catch (e) { /* 忽略 */ }
+}
+
+/* 拉取云端全量（≤50）；无云端或出错返回 null，调用方保留本地列表 */
+function cloudPull() {
+  const url = ORBS_API + '?device_id=' + encodeURIComponent(getDeviceId());
+  try {
+    return fetch(url, { method: 'GET', headers: { Accept: 'application/json' } })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((d) => (d && d.success && d.backend && Array.isArray(d.orbs)) ? d.orbs : null)
+      .catch(() => null);
+  } catch (e) { return Promise.resolve(null); }
+}
+
 function setRect(node, r) {
   if (!node) return;
   if (!r) { if (!node.hidden) node.hidden = true; return; }
@@ -470,10 +529,25 @@ function onOrbPointerDown(e) {
   orbDel = {
     orb, rec, pid: e.pointerId,
     originX: r.left + r.width / 2, originY: r.top + r.height / 2,
-    dx: 0, dy: 0, moved: false, committed: false,
+    dx: 0, dy: 0, moved: false, committed: false, _home: null,
   };
   orb.classList.add('is-del-flash');
   showOrbArc();
+}
+
+/* 拖出时把光球提到 body 顶层，逃离滚动容器的 overflow 裁剪（否则向下拖会消失） */
+function liftOrbToBody(orb) {
+  if (!orb || orbDel._home) return;
+  const r = orb.getBoundingClientRect();
+  orbDel._home = { parent: orb.parentNode, next: orb.nextSibling };
+  orb.style.position = 'fixed';
+  orb.style.left = r.left + 'px';
+  orb.style.top = r.top + 'px';
+  orb.style.width = r.width + 'px';
+  orb.style.height = r.height + 'px';
+  orb.style.margin = '0';
+  orb.style.zIndex = '60';
+  document.body.appendChild(orb);
 }
 
 function onOrbDeleteMove(e) {
@@ -483,6 +557,7 @@ function onOrbDeleteMove(e) {
   orbDel.dx = dx; orbDel.dy = dy;
   if (!orbDel.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
     orbDel.moved = true;
+    liftOrbToBody(orbDel.orb);            // 首次移动即脱离滚动容器
     orbDel.orb.classList.remove('is-del-flash');
     orbDel.orb.classList.add('is-del-drag');
   }
@@ -512,7 +587,9 @@ function commitOrbDelete() {
   }
   records = records.filter((x) => String(x.at) !== String(rec.at));
   writeOrbs(records);
+  cloudDelete(rec.at);                  // 云端同步删除
   hideOrbArc();
+  if (orb && orb.parentNode) orb.parentNode.removeChild(orb);   // 移除被拖出的副本（renderOrbs 重建）
   orbDel = null;
   if (!REDUCED) burstOut(pts, r, 24);    // 炸成光点
   renderOrbs(records, { animateNew: false });
@@ -526,6 +603,15 @@ function cancelOrbDelete() {
   hideOrbArc();
   orb.classList.remove('is-del-flash', 'is-del-drag');
   const gsap = window.gsap;
+  const home = orbDel._home;
+  if (home && home.parent) { try { home.parent.insertBefore(orb, home.next); } catch (e) { /* ignore */ } }
+  orb.style.position = '';
+  orb.style.left = '';
+  orb.style.top = '';
+  orb.style.width = '';
+  orb.style.height = '';
+  orb.style.margin = '';
+  orb.style.zIndex = '';
   if (gsap && !REDUCED) {
     gsap.fromTo(orb, { x: dx, y: dy, scale: 1.28 },
       { x: 0, y: 0, scale: 1, duration: 0.32, ease: 'power3.out', onComplete: () => { orb.style.transform = ''; } });
@@ -1052,8 +1138,10 @@ async function askAi() {
     showAiText(data.reading);
     // 历史回看里重新解读 → 更新那条记录
     if (fromHistory && currentAt != null) {
-      records = records.map((r) => (r.at === currentAt ? Object.assign({}, r, { reading: lastAiText }) : r));
+      let updated = null;
+      records = records.map((r) => (r.at === currentAt ? (updated = Object.assign({}, r, { reading: lastAiText })) : r));
       writeOrbs(records);
+      if (updated) cloudPush(updated);   // 重新解读 → 云端同步更新该条
     }
   } catch (e) {
     if (e && e.name === 'AbortError') showAiError('The reading timed out. The model is busy — please try again shortly.');
@@ -1151,6 +1239,7 @@ async function finishAndReturn() {
     };
     records = records.concat([rec]).slice(-ORB_MAX);
     writeOrbs(records);
+    cloudPush(rec);                  // 新抽 → 云端写入
     await resetOpening({ animateNew: true });
   } else {
     await resetOpening({ animateNew: false });
@@ -1601,6 +1690,14 @@ function init() {
   /* ---- 顶部光球 ---- */
   records = readOrbs();
   renderOrbs(records);
+  /* 云端同步：若 D1 已配置且返回全量，则用云端覆盖本地（跨设备/清缓存后仍能找回） */
+  cloudPull().then((orbs) => {
+    if (orbs && orbs.length) {
+      records = orbs.filter((r) => r && r.cards && r.cards.length === 3).slice(-ORB_MAX);
+      writeOrbs(records);
+      if (state === S.OPENING) renderOrbs(records);
+    }
+  });
 
   /* ---- 事件 ---- */
   if (el.deckHit) {
@@ -1652,9 +1749,10 @@ function init() {
       restoreRecord(rec);
     });
     el.orbRow.addEventListener('pointerdown', onOrbPointerDown);
-    el.orbRow.addEventListener('pointermove', onOrbDeleteMove);
-    el.orbRow.addEventListener('pointerup', onOrbDeleteUp);
-    el.orbRow.addEventListener('pointercancel', onOrbDeleteUp);
+    /* move/up 绑在 window：拖出时光球被提到 body，事件不再冒泡到 orbRow */
+    window.addEventListener('pointermove', onOrbDeleteMove);
+    window.addEventListener('pointerup', onOrbDeleteUp);
+    window.addEventListener('pointercancel', onOrbDeleteUp);
     el.orbRow.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
