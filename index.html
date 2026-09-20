@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0A0908">
 <meta name="description" content="Mucha Tarot — draw three cards and see past, present and future. 78 public-domain meanings, optional AI reading in English and Chinese. For entertainment only.">
 <title>Tarot</title>
@@ -111,25 +111,29 @@
   <!-- 2. 神秘问句 -->
   <p class="opening-question" id="openingQuestion">Whisper your question…</p>
 
-  <!-- 3. 无框输入区（textarea：固定三行高，超出逐步缩字号，仍放不下再滚动；下方流光） -->
-  <div class="opening-field">
-    <textarea id="question" class="opening-input" maxlength="200" rows="1"
-      autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="你想问什么"></textarea>
-    <span class="field-stream" aria-hidden="true"><i></i></span>
+  <!-- 3+5+4. 提问聚簇：输入框 → 流光（贴输入框下方）→ 泛涟漪光圈 → 传统提示，
+       垂直方向由 flex 控制间距，任意屏幕高度都不重叠 -->
+  <div class="ask-cluster" id="askCluster">
+    <!-- 3. 无框输入区（textarea：固定三行高，超出逐步缩字号，仍放不下再滚动；下方流光） -->
+    <div class="opening-field">
+      <textarea id="question" class="opening-input" maxlength="200" rows="1"
+        autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="你想问什么"></textarea>
+      <span class="field-stream" aria-hidden="true"><i></i></span>
+    </div>
+
+    <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散） -->
+    <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
+      <span class="ring-wave"></span>
+      <span class="ring-wave"></span>
+      <span class="ring-wave"></span>
+    </button>
+
+    <!-- 4. 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
+    <p class="opening-hint">
+      <span>Ask once, ask true.</span>
+      <span>Ask twice, the cards lie.</span>
+    </p>
   </div>
-
-  <!-- 4. 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
-  <p class="opening-hint">
-    <span>Ask once, ask true.</span>
-    <span>Ask twice, the cards lie.</span>
-  </p>
-
-  <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散） -->
-  <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
-    <span class="ring-wave"></span>
-    <span class="ring-wave"></span>
-    <span class="ring-wave"></span>
-  </button>
 
   <p id="drawHint" class="opening-error"></p>
 </header>
