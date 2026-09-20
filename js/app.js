@@ -928,7 +928,8 @@ async function startDraw() {
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
   if (scene && scene.ok) scene.wheelApply(wheel.a);   // DEAL 期间 tickOverlay 不再同步，这里显式推一次
   setInputLocked(true);
-  setInputFocused(false);          // 离开提问环节：清除暗淡残留，避免覆盖后续页面
+  setInputFocused(false);
+  resetKeyboardState();          // 离开提问环节：清暗淡 + 清键盘态残留
   showSink(false);
   setAiRingVisible(true);
   setAiThinking(false);
@@ -1556,7 +1557,8 @@ async function resetOpening(opts) {
   // 输入框归零并解锁
   el.question.value = '';
   setInputLocked(false);
-  setInputFocused(false);          // 回到开场：确保暗淡已清除
+  setInputFocused(false);
+  resetKeyboardState();          // 回到开场：清暗淡 + 清键盘态残留（防返回后压层）
   syncRing();
 
   // 问句 / 输入 / 提示 / 光圈：状态 1 不出现，直接隐藏
@@ -1601,7 +1603,8 @@ async function restoreRecord(rec) {
   showSink(false);
   el.question.value = lastQuestion;
   setInputLocked(true);
-  setInputFocused(false);          // 历史回看：聚焦态复位，避免暗淡残留
+  setInputFocused(false);
+  resetKeyboardState();          // 历史回看：聚焦态与键盘态复位
   setOrbsVisible(false);          // 历史回看：光球隐藏
   syncRing();
 
@@ -1835,7 +1838,6 @@ function fitQuestion() {
 const KB_MIN = 90;            // 高度缩水超过该值视为键盘弹出
 const KB_LIFT_MARGIN = 24;    // 输入区底边与键盘顶边的间距
 let vpLock = { w: window.innerWidth, h: window.innerHeight };
-let kbLift = 0;               // 当前输入区上浮量（px）；测量静止底边时用来回退位移
 let kbOn = false;
 let inputFocused = false;     // 统一焦点状态：true → 非输入元素暗淡，输入区+流光上浮
 
@@ -1853,24 +1855,94 @@ function setInputFocused(v) {
   document.body.classList.toggle('input-focused', v);
 }
 
-/* 键盘自适应：每帧实时按「输入框静止底边」计算抬升量（不受当前位移影响），
- * 反复点击输入框也不会漂移。只写 --kb（输入区 translateY 上浮），不改布局。 */
+/* 键盘态复位：离开提问环节 / 返回开场 / 历史回看时必须调用。
+ * 若不复位，输入框会带着 fixed 定位与内联 left/width/bottom 残留，
+ * 返回后压在上层（用户反馈的"文字返回以后和背后元素重叠"）。 */
+let fieldHome = null;        // 输入框在聚簇里的原位置（下一个兄弟节点），搬家后凭它放回
+let fieldMoving = false;     // 搬家进行中：期间触发的 blur 不是真失焦，不据此复位键盘态
+
+function resetKeyboardState() {
+  kbOn = false;
+  document.body.classList.remove('kb-open');
+  restoreField();                    // 搬回聚簇原位（清内联定位也在这一步做）
+  document.documentElement.style.setProperty('--kb', '0px');
+}
+
+/* 键盘自适应：输入框在键盘态下「脱离 flex 流」——由 body.kb-open + 内联
+ * left/width/top 直接钉到键盘上方，问句 / 提示 / 光圈全程不动。
+ *
+ * 坐标口径：fixed 的 top/left 是「相对视觉视口」的像素值。键盘顶边在视觉
+ * 视口里的位置就是 vv.height，所以输入框底边贴 KB_LIFT_MARGIN 上方即：
+ *     top = vv.height - KB_LIFT_MARGIN - fieldH
+ * 再夹一层安全上限，避免多行时越过屏幕顶端。
+ *
+ * ⚠️ 关键：CSS 里祖先带 transform 会成为 fixed 后代的「包含块」——
+ * .ask-cluster 有 translateX(-50%)，会把 fixed 的参照系从视口换成聚簇自身，
+ * 导致 top/left 全部错位。因此键盘态必须把输入框移到 body 下（见 liftFieldOut），
+ * 收起时再放回聚簇原位（见 restoreField）。 */
+const KB_TOP_SAFE = 92;      // 输入框顶边与屏幕顶的最小间距（避开顶部光球/标题）
+function liftFieldOut() {
+  const field = el.openingField;
+  if (!field || field.dataset.lifted === '1') return;
+  if (!fieldHome) fieldHome = field.nextSibling;
+  const wasFocused = document.activeElement === field || document.activeElement === el.question;
+  fieldMoving = true;                        // 搬家会触发一次假 blur，别据此复位
+  field.dataset.lifted = '1';
+  document.body.appendChild(field);         // 脱离 transform 祖先 → fixed 参照系回到视口
+  if (wasFocused && el.question) { try { el.question.focus({ preventScroll: true }); } catch (e) {} }
+  window.setTimeout(() => { fieldMoving = false; }, 0);
+}
+
+function restoreField() {
+  const field = el.openingField;
+  if (!field || field.dataset.lifted !== '1') return;
+  const wasFocused = document.activeElement === el.question;
+  fieldMoving = true;
+  delete field.dataset.lifted;
+  const cluster = document.querySelector('.ask-cluster');
+  if (cluster) cluster.insertBefore(field, fieldHome && fieldHome.parentNode === cluster ? fieldHome : null);
+  else if (fieldHome && fieldHome.parentNode) fieldHome.parentNode.insertBefore(field, fieldHome);
+  fieldHome = null;
+  field.style.left = '';
+  field.style.width = '';
+  field.style.top = '';
+  if (wasFocused && el.question) { try { el.question.focus({ preventScroll: true }); } catch (e) {} }
+  window.setTimeout(() => { fieldMoving = false; }, 0);
+}
+
 function handleKeyboard() {
   const vv = window.visualViewport;
-  let kb = 0;
-  if (vv) kb = Math.max(0, vpLock.h - vv.height - vv.offsetTop);
+  const viewH = vv ? vv.height : window.innerHeight;      // 视觉视口可视高
+  const kb = Math.max(0, vpLock.h - viewH - (vv ? vv.offsetTop : 0));
   const on = kb > KB_MIN;
   kbOn = on;
-  let lift = 0;
-  if (on && el.openingField) {
-    const rect = el.openingField.getBoundingClientRect();
-    const restBottom = rect.bottom + kbLift;     // 回退当前上浮量 → 输入框静止底边
-    const kbTop = vpLock.h - kb;
-    lift = Math.max(0, Math.min(kb, restBottom + KB_LIFT_MARGIN - kbTop));
+
+  const field = el.openingField;
+  /* 键盘态开关：CSS 靠 body.kb-open 把 .opening-field 切成 fixed */
+  document.body.classList.toggle('kb-open', on);
+
+  if (!on || !field) {
+    document.documentElement.style.setProperty('--kb', '0px');
+    restoreField();
+    return;
   }
-  kbLift = lift;
-  document.documentElement.style.setProperty('--kb', lift.toFixed(1) + 'px');
-  if (on) { try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ } }
+
+  liftFieldOut();
+
+  /* 水平位置：与开场聚簇等宽居中（fixed 后不再继承 flex 的居中）。
+   * 搬家后先量一次宽度 —— 脱离 flex 后 width:100% 会变成 body 宽，必须显式钉住。 */
+  const restW = Math.min(vpLock.w * 0.8, 520);
+  const restLeft = Math.max(0, (vpLock.w - restW) / 2);
+  field.style.width = Math.round(restW) + 'px';
+  field.style.left = Math.round(restLeft) + 'px';
+
+  const fieldH = field.offsetHeight || 78;
+  let top = viewH - KB_LIFT_MARGIN - fieldH;               // 底边贴键盘上方
+  if (top < KB_TOP_SAFE) top = KB_TOP_SAFE;                // 多行时不许越出屏幕顶
+  field.style.top = Math.round(top) + 'px';
+
+  document.documentElement.style.setProperty('--kb', '0px');   // fixed 态不再用 --kb 位移
+  try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
 }
 
 /* 键盘缩水（宽同高缩）不重算布局；真实 resize（旋转/分屏）才更新锁定 */
@@ -1909,7 +1981,9 @@ function setupViewport() {
       setInputFocused(true);
     });
     el.question.addEventListener('blur', () => {
+      if (fieldMoving) return;     // 键盘态搬家导致的假 blur：不是真失焦，别复位
       setInputFocused(false);
+      resetKeyboardState();        // 失焦 = 键盘收起：同步清掉键盘态定位
     });
   }
 }
