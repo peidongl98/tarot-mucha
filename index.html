@@ -11,7 +11,7 @@
 <!-- 字体：花体标题 Cinzel Decorative；其余 Cormorant Garamond；中文走系统栈 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500&display=swap">
 
 <link rel="stylesheet" href="css/style.css">
 
@@ -114,12 +114,13 @@
   <!-- 1. 花体标题（点击牌背后淡出，返回开场时重新出现） -->
   <h1 class="opening-title" id="openingTitle">Tarot</h1>
 
-  <!-- 2. 神秘问句 -->
-  <p class="opening-question" id="openingQuestion">Whisper your question…</p>
-
-  <!-- 3+5+4. 提问聚簇：输入框 → 流光（贴输入框下方）→ 泛涟漪光圈 → 传统提示，
-       垂直方向由 flex 控制间距，任意屏幕高度都不重叠 -->
+  <!-- 2+3+5+4. 提问聚簇：问句 → 输入框 → 泛涟漪光圈 → 传统提示。
+       全部由 flex 纵向排布、间距统一由 gap 控制，
+       因此输入 1 / 2 / 3 行（乃至缩到最小字号）都不可能压到问句或提示。 -->
   <div class="ask-cluster" id="askCluster">
+    <!-- 2. 神秘问句 -->
+    <p class="opening-question" id="openingQuestion">Whisper your question…</p>
+
     <!-- 3. 无框输入区（textarea：固定三行高，超出逐步缩字号，仍放不下再滚动；下方流光） -->
     <div class="opening-field">
       <textarea id="question" class="opening-input" maxlength="200" rows="1"
@@ -127,18 +128,18 @@
       <span class="field-stream" aria-hidden="true"><i></i></span>
     </div>
 
-    <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散） -->
+    <!-- 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
+    <p class="opening-hint">
+      <span>Ask once, ask true.</span>
+      <span>Ask twice, the cards lie.</span>
+    </p>
+
+    <!-- 5. 泛涟漪光圈（空态暗且静止，有字后变亮并缓慢扩散）—— 放在聚簇最底部 -->
     <button id="ringBtn" class="opening-ring" type="button" aria-label="开始解读">
       <span class="ring-wave"></span>
       <span class="ring-wave"></span>
       <span class="ring-wave"></span>
     </button>
-
-    <!-- 4. 传统提示（英文两行居中；纯提示，不做任何技术限制） -->
-    <p class="opening-hint">
-      <span>Ask once, ask true.</span>
-      <span>Ask twice, the cards lie.</span>
-    </p>
   </div>
 
   <p id="drawHint" class="opening-error"></p>

@@ -35,8 +35,9 @@
   /* 开场各阶段落位（占开场高度的百分比） */
   --y-orbs: 3.2%;            /* 顶部光球展示区 */
   --y-title: 15%;            /* 标题下移，让开顶部光球的删除操作区 */
-  --y-question: 47%;
-  --y-ask-top: 52%;        /* 提问聚簇（输入框→流光→光圈→提示）顶部落位 */
+  --y-question: 47%;         /* 旧变量：问句已并入聚簇，保留仅为兼容 */
+  --y-ask-top: 52%;          /* 旧变量：聚簇已改底边锚定 */
+  --y-ask-bottom: 12%;       /* 提问聚簇底边距屏底（光圈在最下，落在这里） */
   --ring-size: 78px;
   --orb-size: 20px;        /* 直径 13 → 20px（+54%），点击区域同步放大 */
   --orb-gap: 17px;
@@ -168,16 +169,16 @@ body:not(.has-draw) .site-footer { display: none; }
   transition: filter 0.45s ease;
 }
 
-/* 统一焦点状态：输入框聚焦 → 非输入元素整体暗淡压暗（只改 filter/brightness+opacity，
+/* 统一焦点状态：输入框聚焦 → 非输入元素整体压暗（只改 filter/brightness+opacity，
  * 绝不动 transform / scale / size / position）。失焦或页面切换 → body 去掉该类即复原。
- * 注意：这里不能用全局 overlay 盖整页，只针对非输入元素本身。 */
+ * 注意：① 不能用全局 overlay 盖整页；② 光圈（.opening-ring）必须排除，
+ * 否则"有字后光圈更亮"会被这条压暗规则抵掉。 */
 body.input-focused .gl-layer,
 body.input-focused .opening-title,
 body.input-focused .opening-orbs,
 body.input-focused .opening-question,
-body.input-focused .opening-hint,
-body.input-focused .opening-ring {
-  filter: brightness(0.6) opacity(0.38);
+body.input-focused .opening-hint {
+  filter: brightness(0.42) opacity(0.26);
 }
 
 /* ---------- 0. 顶部光球展示（0 个则不显示；少则居中；多则横向滚动） ---------- */
@@ -400,11 +401,11 @@ body.orb-deleting .opening-orbs { touch-action: none; }
 }
 
 /* ---------- 4. 神秘问句 ---------- */
+/* 已并入 .ask-cluster 作为 flex 第一项：不再绝对定位，
+ * 位置由聚簇统一排布，输入行数变化也永远压不到它。
+ * 字体与输入框严格同源（同族、同斜体、同字距），保证视觉统一。 */
 .opening-question {
-  position: absolute;
-  top: var(--y-question);
-  left: 0;
-  right: 0;
+  position: static;
   margin: 0;
   text-align: center;
   font-family: var(--font-display);
@@ -415,24 +416,31 @@ body.orb-deleting .opening-orbs { touch-action: none; }
   line-height: 1.4;
   color: var(--ivory);
   opacity: 0;
+  transition: filter 0.45s ease, opacity 0.4s ease;
 }
 
 /* ---------- 5. 无框输入框 ---------- */
-/* 提问聚簇：输入框 → 流光 → 光圈 → 提示，垂直方向由 flex 控制间距，
- * 任意屏幕高度下都不重叠；容器本身不拦截指针（避免挡住牌背点击）。 */
+/* 提问聚簇：问句 → 输入框 → 提示 → 光圈（光球在聚簇最底部），
+ * 垂直方向由 flex 控制间距，任意屏幕高度 / 任意输入行数都不重叠。
+ * 容器本身不拦截指针（避免挡住牌背点击）。
+ * 定位改为「底边锚定」：整体以 --y-ask-bottom 贴着屏幕下方，
+ * 输入行数变化只会向上生长，不会把光圈推出屏幕。 */
 .ask-cluster {
   position: absolute;
   left: 50%;
-  top: var(--y-ask-top);
+  bottom: var(--y-ask-bottom, 13%);
   transform: translateX(-50%);
   width: min(80vw, 520px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 14px;
   z-index: 2;
   pointer-events: none;
 }
+
+/* 问句与输入框之间留出更宽的呼吸位（问句是独立段落，不与输入争位） */
+.ask-cluster .opening-question { margin-bottom: 10px; }
 
 /* 输入区：上浮只作用于这里（含流光），键盘弹出时 translateY 到键盘上方；
  * 只动 transform（translateY）/ opacity，永不改 size / position / 其他 transform。 */
@@ -547,12 +555,14 @@ body.orb-deleting .opening-orbs { touch-action: none; }
   transition: border-color 0.85s ease, box-shadow 0.85s ease;
 }
 
-/* 空态：暗 */
+/* 有字后：光圈整体提亮（内圈 + 外晕 + 边框），作为"可以开始解读"的信号 */
 .opening-ring.is-active {
-  border-color: rgba(201, 169, 97, 0.62);
+  border-color: rgba(226, 197, 128, 0.92);
   box-shadow:
-    0 0 28px -4px rgba(201, 169, 97, 0.34),
-    inset 0 0 22px rgba(201, 169, 97, 0.16);
+    0 0 46px -2px rgba(214, 182, 110, 0.62),
+    0 0 90px -18px rgba(214, 182, 110, 0.34),
+    inset 0 0 34px rgba(214, 182, 110, 0.30);
+  filter: brightness(1.32);
 }
 
 /* 涟漪：空态完全不参与渲染；有字后淡入并开始扩散 */
@@ -1257,8 +1267,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --pad-x: 20px;
     --y-orbs: 3%;
     --y-title: 14%;
-    --y-question: 46%;
-    --y-ask-top: 50%;
+    --y-ask-bottom: 10%;
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
@@ -1281,8 +1290,7 @@ body.no-3d .card-hit img { visibility: visible; }
   :root {
     --y-orbs: 2.6%;
     --y-title: 12.5%;
-    --y-question: 43%;
-    --y-ask-top: 46%;
+    --y-ask-bottom: 8%;
     --ring-size: 64px;
     --y-read: 60%;
     --y-ai-ring: 27%;
