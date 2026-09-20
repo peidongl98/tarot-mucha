@@ -57,10 +57,10 @@
    * 同源 —— 只有两边用同一组数字，牌名才压得准牌面中心。
    *   --zoom-card-h  放大牌在屏幕上的高
    *   --zoom-card-cy 放大牌顶边距屏顶（= 牌心高 - 牌高/2）
-   *   --zoom-keys-y  关键词带顶边（牌底再往下 12px） */
+   *   --zoom-keys-y  关键词带顶边（牌底再往下 32px，明显间距、不被牌面遮挡） */
   --zoom-card-h: min(52svh, 153vw);
   --zoom-card-cy: calc(34.5svh - var(--zoom-card-h) / 2);
-  --zoom-keys-y: calc(34.5svh + var(--zoom-card-h) / 2 + 22px);
+  --zoom-keys-y: calc(34.5svh + var(--zoom-card-h) / 2 + 32px);
 
   /* 视口高度：直接用 CSS 原生的 svh（小视口高），不锁 px。
    * 用 svh 而非 dvh —— dvh 会随地址栏伸缩实时变化，导致整屏布局在滑动时跳动；
@@ -179,7 +179,7 @@ body:not(.has-draw) .site-footer { display: none; }
 }
 
 /* ---------- 开场过渡提示（点牌背 → 扇形展开之间） ----------
- * 花体 + 淡金 + 光描边 + 呼吸浮动；停留 1.5~2s 后整块下沉消失（不是淡出）。
+ * 花体斜体 + 淡金 + 光描边 + 呼吸浮动；停留 1.5~2s 后整块下沉消失（不是淡出）。
  * fixed 全屏居中，不参与 .opening 的排版，因此不会挤动任何东西。 */
 .gate-note {
   position: fixed;
@@ -196,12 +196,35 @@ body:not(.has-draw) .site-footer { display: none; }
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  /* 牌背是浅色金纹，浅金字直接压上去几乎读不出。中间压一层径向暗化，
-     只压提示文字那一带，牌的边缘与背景星点仍然保留。 */
+}
+
+/* 暗色底衬：只衬在两行文字下方那一带（不是全屏压暗），柔边看不清边界。
+ * 用 ::before 而不是改 .gate-note 的背景 —— 容器是 fullscreen flex，
+ * 直接给 background 会铺满整屏把牌与星点一起压暗（用户要的是"衬在文字下方"）。 */
+.gate-note::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(78vw, 460px);
+  height: clamp(140px, 26vw, 186px);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  /* 径向渐变 + 模糊双层柔边：中心够实、边缘化开 */
   background: radial-gradient(closest-side ellipse at 50% 50%,
-    rgba(6, 8, 14, 0.72) 0%,
-    rgba(6, 8, 14, 0.54) 46%,
-    rgba(6, 8, 14, 0.00) 86%);
+    rgba(4, 6, 11, 0.80) 0%,
+    rgba(4, 6, 11, 0.66) 42%,
+    rgba(4, 6, 11, 0.34) 68%,
+    rgba(4, 6, 11, 0.00) 100%);
+  -webkit-filter: blur(14px);
+  filter: blur(14px);
+  z-index: -1;                           /* 衬在文字下方 */
+}
+
+/* 两行文字整体在底衬之上（相对定位建立层叠上下文） */
+.gate-note-cn,
+.gate-note-en {
+  position: relative;
 }
 
 .gate-note.is-on { visibility: visible; }
@@ -210,6 +233,7 @@ body:not(.has-draw) .site-footer { display: none; }
 .gate-note-en {
   margin: 0;
   font-family: var(--font-display);
+  font-style: italic;                    /* 花体 + 斜体 */
   color: #F6E9C6;
   -webkit-text-stroke: 0.6px rgba(214, 182, 110, 0.70);
   paint-order: stroke fill;
@@ -867,27 +891,27 @@ body.no-3d .deck-hit-img {
 
 body.no-3d .card-hit img { visibility: visible; }
 
-/* ---------- 牌义（点已翻开的牌 → 原地放大后浮出；只有文字，无框线） ---------- */
+/* ---------- 牌义（点已翻开的牌 → 原地放大后浮出；只有文字，无框线） ----------
+ * 静态排版、不滚动：无 overflow 滚动容器、无上下淡化遮罩、无滚动预留空行。
+ * top 用与 --zoom-keys-y 同一套 svh 变量算，不能写 %：
+ *   % 相对包含块高（viewport 高）解析，svh 相对"小视口高"解析，矮屏差 10~20px，
+ *   混用会让牌义面板顶到关键词带里（实测压 30~48px）。
+ *   统一成 svh 后「牌底 → 关键词 → 牌义」是同一把尺子上的链式关系。
+ * 关键词带高 ~49px + 22px 呼吸间隙 = 71px（见 --zoom-keys-y）。 */
 .card-read {
   position: fixed;
   left: 50%;
-  top: var(--y-read);
+  top: calc(var(--zoom-keys-y) + 71px);
   bottom: 3%;
   width: min(86vw, 640px);
   z-index: 4;
-  overflow-y: auto;                     /* 双语内容更长：面板独立滚动 */
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+  padding: 0;
+  overflow: visible;
   text-align: center;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(16px);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
 }
-
-.card-read::-webkit-scrollbar { display: none; }
 
 .card-read.is-on { pointer-events: auto; }
 
@@ -1038,30 +1062,27 @@ body.no-3d .card-hit img { visibility: visible; }
   color: #C9C0AE;
 }
 
-/* ---------- 牌义正文：独立滚动容器（牌下方），与上面的浮层互不影响 ----------
+/* ---------- 牌义正文：静态排版（牌下方），不滚动、无淡化遮罩 ----------
  * top 必须用与 --zoom-keys-y 同一套 svh 变量算，不能写 %：
  *   % 相对包含块高（viewport 高）解析，svh 相对"小视口高"解析，两者在矮屏上
  *   差 10~20px —— 混用会让关键词带落到牌义面板里（实测压 30~48px）。
  *   统一成 svh 后，「牌底 → 关键词 → 牌义」是同一把尺子上的链式关系，
- *   换任何屏高都不会交叉。 */
+ *   换任何屏高都不会交叉。
+ * 关键词带高 ~49px + 22px 呼吸间隙 = 71px；已去滚动 → 无 mask 遮罩、
+ * 无滚动预留的底部空行，内容直接静态排版。 */
 .card-read {
   position: fixed;
   left: 50%;
-  top: calc(var(--zoom-keys-y) + 60px);   /* 关键词带高 ~49px + 11px 呼吸间隙 */
+  top: calc(var(--zoom-keys-y) + 71px);   /* 关键词带高 ~49px + 22px 呼吸间隙 */
   bottom: 3%;
   width: min(86vw, 640px);
   z-index: 4;
-  padding: 40px 0 118px;                /* 上 > 上淡化带(26px)，下留 4~5 行余量 */
-  overflow-y: auto;                     /* 双语内容更长：面板独立滚动 */
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+  padding: 0;
+  overflow: visible;                    /* 静态显示：不再独立滚动 */
   text-align: center;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(16px);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
 }
 
 /* 牌义正文双语：英文在上（辅助、衬线、略小偏淡）、中文在下（主） */
