@@ -358,8 +358,8 @@ body.input-focused .opening-ring {
 .ask-cluster {
   position: absolute;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  top: var(--y-ask-top);
+  transform: translateX(-50%);
   width: min(80vw, 520px);
   display: flex;
   flex-direction: column;
@@ -386,7 +386,7 @@ body.input-focused .opening-ring {
   display: block;
   width: 100%;
   height: 78px;                 /* 固定三行高（init 时 JS 按实际字号精确校准） */
-  padding: 4px 0;
+  padding: calc((78px - 1.5em) / 2) 0;   /* 基线垂直居中（fitQuestion 会按实际行数精校） */
   font-family: var(--font-display);
   font-size: clamp(17px, 2.5vw, 22px);
   line-height: 1.5;
@@ -1167,6 +1167,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 3%;
     --y-title: 9%;
     --y-question: 46%;
+    --y-ask-top: 50%;
     --ring-size: 70px;
     --orb-size: 18px;
     --orb-gap: 15px;
@@ -1190,6 +1191,7 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-orbs: 2.6%;
     --y-title: 7.5%;
     --y-question: 43%;
+    --y-ask-top: 46%;
     --ring-size: 64px;
     --y-read: 60%;
     --y-ai-ring: 27%;

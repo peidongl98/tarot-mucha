@@ -1418,7 +1418,9 @@ function fitQuestion() {
     ta.style.paddingTop = '0px';
     ta.style.paddingBottom = '0px';
     const lh = fs * Q_LINE_RATIO;
-    const lines = Math.max(1, Math.round(ta.scrollHeight / lh));
+    const hasText = (ta.value || '').trim().length > 0;
+    /* 空框按 1 行居中（scrollHeight≈盒高会被误算成 3 行）；有字再按实际内容行数 */
+    const lines = hasText ? Math.max(1, Math.round(ta.scrollHeight / lh)) : 1;
     const pad = Math.max(0, (boxH - lines * lh) / 2);
     ta.style.paddingTop = pad.toFixed(1) + 'px';
     ta.style.paddingBottom = pad.toFixed(1) + 'px';
