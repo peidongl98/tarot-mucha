@@ -1885,11 +1885,18 @@ function liftFieldOut() {
   const field = el.openingField;
   if (!field || field.dataset.lifted === '1') return;
   if (!fieldHome) fieldHome = field.nextSibling;
-  const wasFocused = document.activeElement === field || document.activeElement === el.question;
-  fieldMoving = true;                        // 搬家会触发一次假 blur，别据此复位
+  const wasFocused = document.activeElement === el.question || document.activeElement === field;
+  /* 搬家会让聚焦元素失焦（DOM 移动的既有行为）→ 会触发一次假 blur。
+   * 用 flag 挡住这次 blur 的复位；搬完后再把焦点还回去，
+   * 否则用户按键盘上的「收起」键时 blur 不触发 → 表现为「点开后关不掉」。
+   * 还焦点必须放在 fieldMoving 复位**之前**的同一次同步流里，
+   * 或直接由 flag 覆盖（focus 事件不查 flag，所以是安全的）。 */
+  fieldMoving = true;
   field.dataset.lifted = '1';
   document.body.appendChild(field);         // 脱离 transform 祖先 → fixed 参照系回到视口
-  if (wasFocused && el.question) { try { el.question.focus({ preventScroll: true }); } catch (e) {} }
+  if (wasFocused && el.question && document.activeElement !== el.question) {
+    try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ }
+  }
   window.setTimeout(() => { fieldMoving = false; }, 0);
 }
 
@@ -1897,7 +1904,7 @@ function restoreField() {
   const field = el.openingField;
   if (!field || field.dataset.lifted !== '1') return;
   const wasFocused = document.activeElement === el.question;
-  fieldMoving = true;
+  fieldMoving = true;                        // 搬回同样会造成一次假 blur，挡住
   delete field.dataset.lifted;
   const cluster = document.querySelector('.ask-cluster');
   if (cluster) cluster.insertBefore(field, fieldHome && fieldHome.parentNode === cluster ? fieldHome : null);
@@ -1906,7 +1913,9 @@ function restoreField() {
   field.style.left = '';
   field.style.width = '';
   field.style.top = '';
-  if (wasFocused && el.question) { try { el.question.focus({ preventScroll: true }); } catch (e) {} }
+  /* 只在「收起前确实还在输入」时还焦点；若收起本来就是失焦引起的（用户点了别处），
+   * 绝不能抢回焦点，否则点空白处会变成关不掉的循环。 */
+  if (wasFocused && el.question) { try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ } }
   window.setTimeout(() => { fieldMoving = false; }, 0);
 }
 
@@ -1974,7 +1983,7 @@ function setupViewport() {
     vv.addEventListener('scroll', () => { if (kbOn) window.scrollTo(0, 0); });
   }
   /* 焦点状态统一驱动暗淡：聚焦 → 非输入元素暗淡；失焦 → 复原。
-   * 键盘弹出时的上浮由 handleKeyboard 经 --kb 处理，这里只管焦点状态。 */
+   * 键盘弹出时的上浮由 handleKeyboard 处理，这里只管焦点状态。 */
   if (el.question) {
     el.question.addEventListener('focus', () => {
       try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
@@ -1986,6 +1995,28 @@ function setupViewport() {
       resetKeyboardState();        // 失焦 = 键盘收起：同步清掉键盘态定位
     });
   }
+
+  /* 收起键盘的兜底出口。
+   * 为什么必须有：键盘态下输入框被搬到了 body 下，聚焦可能已不在它身上
+   * （DOM 移动的副作用），此时 blur 不会再触发 —— 若只靠 blur 收起，
+   * 用户体验就是「输入框点开后关不掉」。因此额外提供两个明确出口：
+   *   ① 按住输入框以外的任何位置（pointerdown 在输入框外）→ 失焦收起
+   *   ② Escape 键 → 失焦收起
+   * 两者都只在键盘态/聚焦态下生效，不干扰其他交互。 */
+  const blurIfTyping = () => {
+    if (!kbOn && !inputFocused) return;
+    if (el.question) { try { el.question.blur(); } catch (e) { /* 忽略 */ } }
+    setInputFocused(false);
+    resetKeyboardState();
+  };
+  document.addEventListener('pointerdown', (e) => {
+    if (!kbOn && !inputFocused) return;
+    if (el.openingField && el.openingField.contains(e.target)) return;   // 点输入区自身：不收起
+    blurIfTyping();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') blurIfTyping();
+  });
 }
 
 /* ============================================================
