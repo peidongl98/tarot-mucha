@@ -1775,17 +1775,24 @@ function liftFieldOut() {
   if (!field || field.dataset.lifted === '1') return;
   if (!fieldHome) fieldHome = field.nextSibling;
   const wasFocused = document.activeElement === el.question || document.activeElement === field;
-  /* 搬家会让聚焦元素失焦（DOM 移动的既有行为）→ 会触发一次假 blur。
-   * 用 flag 挡住这次 blur 的复位；搬完后再把焦点还回去，
-   * 否则用户按键盘上的「收起」键时 blur 不触发 → 表现为「点开后关不掉」。
-   * 还焦点必须放在 fieldMoving 复位**之前**的同一次同步流里，
-   * 或直接由 flag 覆盖（focus 事件不查 flag，所以是安全的）。 */
+  /* 搬家会让聚焦元素失焦（DOM 移动的既有行为）→ 触发一次假 blur，用 flag 挡住。
+   *
+   * ⚠️ 搬完**必须无条件把焦点还给 input**（前提：搬之前焦点在输入区里）。
+   * 曾经的写法是「仅当 activeElement !== el.question 才 refocus」——这个判断是错的：
+   * 点输入框时 activeElement 本来**就是** el.question，条件恒为 false，永远不 refocus。
+   * 结果：焦点掉到 body 上 → 用户按键盘自带的「收起」键时 input 早就不在焦点，
+   * 不会触发 blur → 表现为「点键盘回收键无法收起，只能点键盘外面」
+   * （点键盘外面之所以有效，是因为兜底的 pointerdown 出口不看焦点）。
+   *
+   * 还焦点必须严格限定在「搬之前焦点就在输入区」的情况；
+   * 若是别的原因走进来（理论上不该有），抢焦点会造成关不掉的循环。 */
   fieldMoving = true;
   field.dataset.lifted = '1';
   document.body.appendChild(field);         // 脱离 transform 祖先 → fixed 参照系回到视口
-  if (wasFocused && el.question && document.activeElement !== el.question) {
+  if (wasFocused && el.question) {
     try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ }
   }
+  /* fieldMoving 用宏任务复位：blur 是同步派发的，等焦点还回去并稳定后再放开 */
   window.setTimeout(() => { fieldMoving = false; }, 0);
 }
 
@@ -1908,7 +1915,11 @@ function setupViewport() {
    * 用户体验就是「输入框点开后关不掉」。因此额外提供两个明确出口：
    *   ① 按住输入框以外的任何位置（pointerdown 在输入框外）→ 失焦收起
    *   ② Escape 键 → 失焦收起
-   * 两者都只在键盘态/聚焦态下生效，不干扰其他交互。 */
+   * 两者都只在键盘态/聚焦态下生效，不干扰其他交互。
+   *
+   * ⚠️ 不能只调 el.question.blur()：若焦点已不在 input 上（搬家副作用残留），
+   * blur() 是空操作，键盘收不掉。所以「先无条件复位 UI 状态」，
+   * blur() 只作为额外保险（触发浏览器原生收键盘）。 */
   const blurIfTyping = () => {
     if (!kbOn && !inputFocused) return;
     if (el.question) { try { el.question.blur(); } catch (e) { /* 忽略 */ } }
@@ -1923,6 +1934,30 @@ function setupViewport() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') blurIfTyping();
   });
+
+  /* 「键盘回收」出口：软键盘自带的收起键 / 系统返回键收起键盘时，
+   * 视觉视口会恢复高度 —— 这是唯一的可靠信号。
+   *
+   * 为什么不能只信 blur：真机上输入框被搬到 body 下后，某些输入法收起键盘时
+   * input 保持焦点、**不发 blur**，只把 visualViewport 恢复。此时若只监听 blur，
+   * 键盘态（fixed 定位 + body.kb-open）就永远残留 —— 用户报的
+   * 「点键盘回收键无法收起，只能点键盘外面」正是此形态。
+   *
+   * ⚠️ 定时器必须**常驻**，不能自我清理：早期写法是「kbOn 为 false 就 clearInterval」，
+   * 但本函数在页面加载时即启动，那时 kbOn 恒为 false → 定时器第一轮就自杀，
+   * 之后再不会运行（这就是兜底失效的原因）。正确做法是常驻轮询、
+   * 内部只在 kbOn 为真时才判视口，开销可忽略（220ms 一次的两个属性读取）。 */
+  window.setInterval(() => {
+    if (!kbOn) return;                       // 非键盘态：什么都不做，但定时器继续活着
+    const vv2 = window.visualViewport;
+    const viewH = vv2 ? vv2.height : window.innerHeight;
+    const kbNow = Math.max(0, vpLock.h - viewH - (vv2 ? vv2.offsetTop : 0));
+    if (kbNow <= KB_MIN) {
+      /* 视口已恢复但状态仍标记键盘开着 → 键盘真的收了，强制复位 */
+      setInputFocused(false);
+      resetKeyboardState();
+    }
+  }, 220);
 }
 
 /* ============================================================
