@@ -298,7 +298,7 @@ body.orb-deleting .opening-orbs { touch-action: none; }
   opacity: 0;
   transition: opacity 0.28s ease;
   z-index: 4;
-  clip-path: inset(0 0 50% 0);   /* 只保留上半圆：完整圆形、顶部露一半 */
+  clip-path: inset(50% 0 0 0);   /* 只保留下半圆：圆弧朝下（碗状托住光球） */
   overflow: visible;
 }
 .orb-delete-arc.is-on { opacity: 1; }
