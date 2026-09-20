@@ -38,11 +38,10 @@ const DRAG_SLOP = 12;          // 按下到抬起的位移阈值（px）：超�
 const SWIPE_MIN = 46;          // 触发上滑 / 下滑的最小竖直位移
 const SWIPE_MAX_MS = 700;      // 手势最长时间
 
-/* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互） */
+/* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互）。
+ * 交互 = 点击左右发光三角形换牌（无拖动、无滚轮、无滑动）。 */
 const WHEEL_STEP = (Math.PI * 2) / 3;   // 相邻两牌的角距（120°）
-const WHEEL_DRAG_RATE = 4.4;            // 拖动灵敏度：约半屏宽度转一格（120°）
-const WHEEL_FLING_GAIN = 0.16;          // 惯性外推时间（秒）
-const wheel = { a: 0, dragging: false, tween: null, suppressedAt: 0 };
+const wheel = { a: 0, tween: null };
 
 /* 状态机 */
 const S = { OPENING: 'opening', ASK: 'ask', DEAL: 'deal', ROW: 'row', ZOOM: 'zoom', READING: 'reading', ENDING: 'ending' };
@@ -564,12 +563,6 @@ function setInputLocked(on) {
  * 拖动只换位置，不改变朝向 —— 翻没翻由 cardsFlipped 决定，必须点击才翻面。
  * ============================================================ */
 
-function wheelNudge(dxPx) {
-  if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
-  wheel.dragging = true;
-  wheel.a -= dxPx * (WHEEL_DRAG_RATE / Math.max(1, window.innerWidth));   // 左拖 = 前进
-}
-
 function wheelSnapTo(target, dur) {
   const gsap = window.gsap;
   if (wheel.tween) { wheel.tween.kill(); wheel.tween = null; }
@@ -579,13 +572,6 @@ function wheelSnapTo(target, dur) {
     a: target, duration: dur || 0.8, ease: 'power3.out',   // 柔顺吸附，无弹簧回弹
     onComplete: () => { wheel.tween = null; },
   });
-}
-
-function wheelRelease(velocityPxPerSec) {
-  wheel.dragging = false;
-  const rate = WHEEL_DRAG_RATE / Math.max(1, window.innerWidth);
-  const proj = wheel.a - (velocityPxPerSec || 0) * WHEEL_FLING_GAIN * rate;   // 惯性与拖动同向
-  wheelSnapTo(Math.round(proj / WHEEL_STEP) * WHEEL_STEP, 0.85);
 }
 
 /* 把第 index 张牌转到居中位（取当前角度附近最近的等价角，避免绕远路） */
@@ -616,38 +602,12 @@ function wheelFocusCos(i) {
   return Math.cos(d);
 }
 
-const wheelResting = () => !wheel.dragging && !wheel.tween;
+const wheelResting = () => !wheel.tween;
 
-/* ---- 指针拖动（窗口级：从任何位置起拖都行；点击与拖动用位移阈值区分） ---- */
-let wheelPtr = null;
-
-function onWheelPtrDown(e) {
-  if (state !== S.ROW || wheelPtr) return;
-  wheelPtr = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), vx: 0, moved: 0 };
-}
-
-function onWheelPtrMove(e) {
-  if (!wheelPtr || e.pointerId !== wheelPtr.id) return;
-  const dx = e.clientX - wheelPtr.lastX;
-  const dy = e.clientY - wheelPtr.lastY;
-  wheelPtr.lastX = e.clientX;
-  wheelPtr.lastY = e.clientY;
-  wheelPtr.moved += Math.abs(dx) + Math.abs(dy);
-  if (!dx) return;
-  const now = performance.now();
-  const dt = Math.max(8, now - wheelPtr.lastT) / 1000;
-  wheelPtr.lastT = now;
-  wheelPtr.vx = wheelPtr.vx * 0.7 + (dx / dt) * 0.3;   // 平滑速度，松手时用于惯性
-  wheelNudge(dx);
-}
-
-function onWheelPtrUp(e) {
-  if (!wheelPtr || e.pointerId !== wheelPtr.id) return;
-  const v = wheelPtr.vx;
-  const moved = wheelPtr.moved;
-  wheelPtr = null;
-  wheelRelease(moved > DRAG_SLOP ? v : 0);
-  if (moved > DRAG_SLOP) wheel.suppressedAt = Date.now();   // 拖动后的误点击不当作翻牌
+/* 三角形切换：点右 → 右侧牌转入居中（Past→Present→Future 循环）；点左反向 */
+function wheelStepTo(dir) {
+  if (state !== S.ROW || zoomIndex >= 0) return;
+  wheelGoTo(wheelFocusedIndex() + dir, 0.75);
 }
 
 /* ============================================================
@@ -704,7 +664,6 @@ async function startDraw() {
  * ============================================================ */
 
 function onCardHit(i) {
-  if (Date.now() - wheel.suppressedAt < 400) return;   // 拖动结束后的误触不当作点击
   if (state === S.ZOOM) {
     if (zoomIndex === i) zoomOut();
     return;
@@ -1245,13 +1204,13 @@ async function restoreRecord(rec) {
  * 点击区对齐（3D 模式按投影；无 3D 模式用固定排布）
  * ============================================================ */
 
-/* 无 3D 时的滚筒：用与 3D 相同的公式算屏幕矩形，图片按当前朝向显示 */
+/* 无 3D 时的滚筒（横向）：用与 3D 相同的公式算屏幕矩形，图片按当前朝向显示 */
 function layoutFallbackWheel() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   const cardH = Math.min(h * 0.45, w * 1.62);
   const ratio = 0.5625;
-  const R = h * 0.275;
+  const R = Math.min(w * 0.58, h * 0.72);
   const cy = h * 0.445;
   for (let i = 0; i < 3; i++) {
     const n = el.hits[i];
@@ -1259,13 +1218,15 @@ function layoutFallbackWheel() {
     let d = (i * WHEEL_STEP - wheel.a) % (Math.PI * 2);
     if (d > Math.PI) d -= Math.PI * 2;
     else if (d < -Math.PI) d += Math.PI * 2;
+    const s = Math.sin(d);
     const c = Math.cos(d);
-    const scale = 0.72 + (1 - 0.72) * Math.max(0, c);
+    const scale = 0.66 + (1 - 0.66) * Math.max(0, c);
     const cw = cardH * ratio * scale;
     const ch = cardH * scale;
-    const y = cy - R * Math.sin(d);
+    const x = w / 2 + R * s;
+    const y = cy + R * 0.10 * Math.abs(s);
     n.hidden = false;
-    n.style.left = (w / 2 - cw / 2) + 'px';
+    n.style.left = (x - cw / 2) + 'px';
     n.style.top = (y - ch / 2) + 'px';
     n.style.width = cw + 'px';
     n.style.height = ch + 'px';
@@ -1308,6 +1269,11 @@ function updateHits() {
 let wheelLabelIndex = -1;
 
 function tickWheelUi() {
+  /* 三角形只在滚筒态出现（放大 / 解读 / 其他状态隐藏） */
+  const navOn = state === S.ROW;
+  if (el.navPrev) el.navPrev.classList.toggle('is-on', navOn);
+  if (el.navNext) el.navNext.classList.toggle('is-on', navOn);
+
   if (!el.wheelLabel) return;
   if (state !== S.ROW || !lastReading) {
     el.wheelLabel.classList.remove('is-on');
@@ -1500,6 +1466,8 @@ function cacheDom() {
 
   el.cardRead = document.getElementById('cardRead');
   el.zoomLabel = document.getElementById('zoomLabel');
+  el.navPrev = document.getElementById('wheelPrev');
+  el.navNext = document.getElementById('wheelNext');
   el.readName = document.getElementById('readName');
   el.readBadge = document.getElementById('readBadge');
   el.readKeys = document.getElementById('readKeys');
@@ -1550,6 +1518,8 @@ function init() {
     el.deckHit.addEventListener('click', onDeckClick);
   }
   el.hits.forEach((n, i) => { if (n) n.addEventListener('click', () => onCardHit(i)); });
+  if (el.navPrev) el.navPrev.addEventListener('click', () => wheelStepTo(-1));
+  if (el.navNext) el.navNext.addEventListener('click', () => wheelStepTo(1));
   if (el.ringBtn) el.ringBtn.addEventListener('click', startDraw);
   if (el.question) {
     /* textarea：禁止换行（粘贴的多行折叠成空格），输入即同步流光/光圈与自适应 */
@@ -1593,16 +1563,6 @@ function init() {
   window.addEventListener('wheel', onWheel, { passive: true });
   window.addEventListener('touchstart', onTouchStart, { passive: true });
   window.addEventListener('touchend', onTouchEnd, { passive: true });
-
-  /* 滚筒拖动：窗口级 pointer 事件（按下即跟踪，位移超阈值才算拖动） */
-  window.addEventListener('pointerdown', onWheelPtrDown);
-  window.addEventListener('pointermove', onWheelPtrMove);
-  window.addEventListener('pointerup', onWheelPtrUp);
-  window.addEventListener('pointercancel', (e) => {
-    if (!wheelPtr || e.pointerId !== wheelPtr.id) return;
-    wheelPtr = null;
-    wheelRelease(0);
-  });
 
   /* ---- 视口锁定 + 键盘自适应 ----
    * 键盘弹出（宽不变、高骤缩）时：不 resize 场景、不挤布局，

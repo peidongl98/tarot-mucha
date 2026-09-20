@@ -72,15 +72,18 @@ export const CONFIG = {
   topHeightRatio: 0.17,    // 固定到顶部时的牌高
   topCenterY: 0.135,       // 顶部牌心所在的视口高度比例
 
-  /* 三张牌滚筒：竖直排列（上中下），水平轴，左右拖动旋转
-   * 朝向与位置解耦：翻没翻只影响 flipper（牌面/牌背），滚筒只改位置 —— 拖到任何位置都保持当前朝向。 */
-  wheelStep: (Math.PI * 2) / 3,  // 相邻两牌在轮上的角距（120°：居中 + 上下各一张）
+  /* 三张牌滚筒：横向排列（左·中·右），点两侧发光三角形切换
+   * 朝向与位置解耦：翻没翻只影响 flipper（牌面/牌背），滚筒只改位置 —— 切到任何位置都保持当前朝向。
+   * δ=0 居中（最大、正对相机）；δ=±120° 在右/左（缩小、后撤、朝中心倾转，只露内缘）。 */
+  wheelStep: (Math.PI * 2) / 3,  // 相邻两牌在轮上的角距（120°）
   wheelCenterY: 0.445,     // 滚筒中心所在视口高度
   wheelHeightRatio: 0.45,  // 居中牌高（占视口；另有宽度上限）
-  wheelRadiusRatio: 0.275, // 轮半径（占视口高）→ 侧牌竖直偏移 = sin120° × 该值 ≈ 0.24 视口高
-  wheelMinScale: 0.72,     // 侧牌缩放下限（透视还会再缩小一点）
-  wheelTiltAmp: 0.5,       // 侧牌后仰幅度（rad，按 sin(δ) 平滑过渡，居中牌为 0）
-  wheelDepth: 0.45,        // 侧牌后退深度系数（越大纵深越强）
+  wheelRadiusXRatio: 0.58, // 横向轮半径（占视宽）→ 侧牌中心滑到屏幕边缘外，只露内缘
+  wheelRadiusYMax: 0.72,   // 半径上限（占视高，宽屏防止侧牌飞太远）
+  wheelArcRatio: 0.10,     // 侧牌下沉量（占半径）：轻微弧线，不像死板的直线
+  wheelMinScale: 0.66,     // 侧牌缩放下限（透视还会再缩小一点）
+  wheelTiltAmp: 0.52,      // 侧牌绕 Y 倾转幅度（rad，coverflow：两侧牌朝中心转）
+  wheelDepth: 0.24,        // 侧牌后退深度系数（越大纵深越强）
   wheelDim: 0.78,          // 侧牌不透明度下限（突出中间那张）
   wheelBob: 0.007,         // 落位后的轻微起伏（世界单位，约 1.6px）
 };
@@ -1278,16 +1281,18 @@ export function createTarotScene(container) {
     const s = Math.sin(d);
     const c = Math.cos(d);
     const cardHpx = Math.min(h * CONFIG.wheelHeightRatio, w * 1.62);
-    const Rpx = h * CONFIG.wheelRadiusRatio;
-    const yPx = h * CONFIG.wheelCenterY - Rpx * s;      // δ>0 → 在上方（屏幕 y 更小）
-    const z = -(1 - c) * pixelsToWorld(Rpx, 0) * CONFIG.wheelDepth;
-    const p = screenToWorld(w / 2, yPx, z, wheelVec);
+    const Rpx = Math.min(w * CONFIG.wheelRadiusXRatio, h * CONFIG.wheelRadiusYMax);
+    const xPx = w / 2 + Rpx * s;                          // δ=0 居中；δ>0 在右
+    const yPx = h * CONFIG.wheelCenterY + Rpx * CONFIG.wheelArcRatio * Math.abs(s);
+    const z = -(1 - Math.max(0, c)) * pixelsToWorld(Rpx, 0) * CONFIG.wheelDepth;
+    const p = screenToWorld(xPx, yPx, z, wheelVec);
     out.x = p.x;
     out.y = p.y;
     out.z = z;
     out.scale = (pixelsToWorld(cardHpx, 0) / CARD_H)
       * (CONFIG.wheelMinScale + (1 - CONFIG.wheelMinScale) * Math.max(0, c));
-    out.rotX = -CONFIG.wheelTiltAmp * s;                // 上牌后仰、下牌前倾（cylinder 观感）
+    out.rotY = -CONFIG.wheelTiltAmp * s;                // 侧牌朝中心倾转（coverflow）
+    out.rotX = 0;
     out.cos = c;
     return out;
   }
@@ -1304,7 +1309,7 @@ export function createTarotScene(container) {
       if (!c || c.flying) continue;
       const sl = computeWheelSlot(i, wheelSlotTmps[i]);
       c.root.position.set(sl.x, sl.y + Math.sin(t * 0.6 + i * 2.1) * CONFIG.wheelBob, sl.z);
-      c.root.rotation.set(sl.rotX, 0, 0);
+      c.root.rotation.set(sl.rotX, sl.rotY, 0);
       c.root.scale.setScalar(sl.scale);
       const op = CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, sl.cos);
       if (Math.abs(op - wheelLastOp[i]) > 0.01) {
@@ -1504,7 +1509,7 @@ export function createTarotScene(container) {
         const t = computeWheelSlot(i, wheelSlotTmps[i]);
         card.root.scale.setScalar(t.scale);
         card.root.position.set(t.x, t.y, t.z);
-        card.root.rotation.set(t.rotX, 0, 0);
+        card.root.rotation.set(t.rotX, t.rotY || 0, 0);
         card.setOpacity(CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, t.cos));
         wheelLastOp[i] = -1;
       }
@@ -1539,7 +1544,7 @@ export function createTarotScene(container) {
       const at = flyAt + 0.14 * speed * i;
       /* 由小变大、边飞边散开（位置 back.out 轻微过冲 = 落位弹性） */
       tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25 * speed, ease: 'back.out(1.15)' }, at);
-      tl.to(c.root.rotation, { x: s.rotX, y: 0, z: 0, duration: 1.2 * speed, ease: 'power3.out' }, at);
+      tl.to(c.root.rotation, { x: s.rotX, y: s.rotY || 0, z: 0, duration: 1.2 * speed, ease: 'power3.out' }, at);
       tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.15 * speed, ease: 'back.out(1.3)' }, at);
     });
 
@@ -1606,7 +1611,7 @@ export function createTarotScene(container) {
           const t = wheelTarget(j);
           o.root.scale.setScalar(t.scale);
           o.root.position.set(t.x, t.y, t.z);
-          o.root.rotation.set(t.rotX, 0, 0);
+          o.root.rotation.set(t.rotX, t.rotY || 0, 0);
           o.setOpacity(CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, t.cos));
         });
         wheelLastOp = [-1, -1, -1];
@@ -1640,7 +1645,7 @@ export function createTarotScene(container) {
         const t = wheelTarget(j);
         tl.to(o.root.scale, { x: t.scale, y: t.scale, z: t.scale, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
         tl.to(o.root.position, { x: t.x, y: t.y, z: t.z, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
-        tl.to(o.root.rotation, { x: t.rotX, y: 0, z: 0, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
+        tl.to(o.root.rotation, { x: t.rotX, y: t.rotY || 0, z: 0, duration: 0.85, ease: 'power3.inOut' }, 0.05 * j);
         tl.to({ v: o.materials[0].opacity }, {
           v: CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, t.cos),
           duration: 0.5,
@@ -1666,7 +1671,7 @@ export function createTarotScene(container) {
         const s = mode === 'top' ? topSlots[i] : computeWheelSlot(i, wheelSlotTmps[i]);
         c.root.scale.setScalar(s.scale);
         c.root.position.set(s.x, s.y, s.z);
-        c.root.rotation.set(mode === 'top' ? 0 : s.rotX, mode === 'top' ? s.rotY : 0, 0);
+        c.root.rotation.set(mode === 'top' ? 0 : s.rotX, mode === 'top' ? s.rotY : (s.rotY || 0), 0);
       });
       readingView = mode;
       wheelLastOp = [-1, -1, -1];
@@ -1687,7 +1692,7 @@ export function createTarotScene(container) {
       tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 0.95, ease: 'power3.inOut' }, 0.05 * i);
       tl.to(c.root.rotation, {
         x: mode === 'top' ? 0 : s.rotX,
-        y: mode === 'top' ? s.rotY : 0,
+        y: mode === 'top' ? s.rotY : (s.rotY || 0),
         z: 0, duration: 0.95, ease: 'power3.inOut',
       }, 0.05 * i);
     });
