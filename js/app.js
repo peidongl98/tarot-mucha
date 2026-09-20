@@ -39,6 +39,20 @@ const LEGACY_KEY = 'tarot_history';
 const HOLD_MS = 1500;          // 长按返回光球（Seal）的时长：进度与光球变亮同步
 const DRAG_SLOP = 12;          // 按下到抬起的位移阈值（px）：超过就算拖动，不算点击
 
+/* 卡牌图路径：优先用 cards/w/*.webp（约 54KB/张，原 jpg 约 344KB/张，首抽从 ~1MB 降到 ~160KB）。
+ * 探测一下 WebP 支持，不支持则回退原始 jpg，保证兼容性。 */
+const WEBP_OK = (() => {
+  try { return document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0; }
+  catch (e) { return false; }
+})();
+function cardSrc(file) {
+  if (WEBP_OK) return 'cards/w/' + file.replace(/\.(jpg|jpeg|png)$/i, '.webp');
+  return 'cards/' + file;
+}
+function backSrc() {
+  return WEBP_OK ? 'cards/w/back.webp' : 'cards/back.jpg';
+}
+
 /* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互）。
  * 交互 = 点击左右发光三角形换牌（无拖动、无滚轮、无滑动）。 */
 const WHEEL_STEP = (Math.PI * 2) / 3;   // 相邻两牌的角距（120°）
@@ -933,7 +947,7 @@ async function startDraw() {
     // ③ 扇形退场 + 三张牌飞向滚筒（背面朝上）—— 立即开播，不等光球炸星
     if (scene && scene.ok) {
       await scene.dealFromFan(cards.map((c) => ({
-        src: 'cards/' + TAROT_BY_ID[c.id].file,
+        src: cardSrc(TAROT_BY_ID[c.id].file),
         reversed: !!c.reversed,
       })));
     } else {
@@ -1442,7 +1456,7 @@ async function restoreRecord(rec) {
     const vanishP = (scene && scene.ok) ? scene.openingVanish() : Promise.resolve();
     if (scene && scene.ok) {
       await scene.dealFromFan(lastReading.map((c) => ({
-        src: 'cards/' + TAROT_BY_ID[c.id].file,
+        src: cardSrc(TAROT_BY_ID[c.id].file),
         reversed: !!c.reversed,
       })), { fromDeck: true, quick: true });
       for (let i = 0; i < 3; i++) scene.presetFlipped(i);
@@ -1504,7 +1518,7 @@ function setHitFace(i, flipped) {
   const img = n.querySelector('img');
   if (!img || !lastReading || !lastReading[i]) return;
   const meta = TAROT_BY_ID[lastReading[i].id];
-  if (meta) img.src = flipped ? 'cards/' + meta.file : 'cards/back.jpg';
+  if (meta) img.src = flipped ? cardSrc(meta.file) : backSrc();
 }
 
 function updateHits() {
@@ -1802,6 +1816,10 @@ function init() {
     if (el.deckHit) el.deckHit.hidden = false;
   } else {
     scene.openingShowDeck();
+    /* 空闲后台预热全部牌面（webp 约 54KB/张），抽牌时命中缓存即秒出 */
+    if (scene.preloadFaces && window.TAROT_CARDS) {
+      scene.preloadFaces(window.TAROT_CARDS.map((c) => cardSrc(c.file)));
+    }
     if (el.glNotice) el.glNotice.hidden = true;
   }
 

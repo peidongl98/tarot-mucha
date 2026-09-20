@@ -313,6 +313,13 @@ loader.setCrossOrigin('anonymous');
 const texCache = {};
 let backTexPromise = null;
 
+/* 牌背图路径：优先 cards/w/back.webp（约 54KB），不支持 WebP 回退 jpg。 */
+const BACK_SRC = (() => {
+  try { return document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') === 0
+    ? 'cards/w/back.webp' : 'cards/back.jpg'; }
+  catch (e) { return 'cards/back.jpg'; }
+})();
+
 /* 加载贴图。关键：真机（尤其微信内置浏览器/弱网）图片请求可能「既不 onLoad 也不 onError」
  * 永久挂起，导致 await 永不 resolve → 抽牌死锁在 S.DEAL。这里每次尝试都带硬超时；超时或
  * 出错都会重试，最多 tries 次；全部失败才 resolve(null)（退回纯色牌面，不阻塞抽牌）。
@@ -467,6 +474,7 @@ export function createTarotScene(container) {
     cardBottomY: () => null,
     updateMist: () => {},
     openingShowDeck: () => Promise.resolve(),
+    preloadFaces: () => {},
     openingVanish: () => Promise.resolve(),
     openingFan: () => null,
     openingDeckRect: () => null,
@@ -860,9 +868,9 @@ export function createTarotScene(container) {
   async function openingBuild() {
     if (openingGroup) return;
     /* 首屏就预热牌背：写入缓存，抽牌时即可零等待命中 */
-    backTexPromise = loadTexture('cards/back.jpg', anisotropy);
+    backTexPromise = loadTexture(BACK_SRC, anisotropy);
     openingBackTex = await backTexPromise;
-    if (openingBackTex) texCache['cards/back.jpg'] = openingBackTex;
+    if (openingBackTex) texCache[BACK_SRC] = openingBackTex;
     openingGroup = new THREE.Group();
     scene.add(openingGroup);
     openingCards = [];
@@ -874,6 +882,26 @@ export function createTarotScene(container) {
       openingGroup.add(card.root);
       openingCards.push(card);
     }
+  }
+
+  /* 空闲时后台分批预热全部牌面（78 张，webp 约 54KB/张 → 共 ~4MB）。
+   * 用户看开场/提问的十几秒里基本能加载完，抽牌时命中缓存即"秒出"。
+   * 每批 6 张、批间隔 250ms，避免抢首屏带宽与主线程。 */
+  let preloadStarted = false;
+  function preloadFaces(files) {
+    if (preloadStarted || !files || !files.length) return;
+    preloadStarted = true;
+    let idx = 0;
+    const step = () => {
+      const batch = files.slice(idx, idx + 6);
+      idx += 6;
+      batch.forEach((src) => {
+        if (texCache[src]) return;
+        loadTexture(src, anisotropy).then((t) => { if (t) texCache[src] = t; });
+      });
+      if (idx < files.length) setTimeout(step, 250);
+    };
+    setTimeout(step, 600);   // 让首屏先站稳
   }
 
   /* 单张牌背的「原地轻摆 + 指针跟随」全部在渲染循环里逐帧计算
@@ -1013,6 +1041,8 @@ export function createTarotScene(container) {
       });
     });
   };
+
+  api.preloadFaces = function (files) { preloadFaces(files); };
 
   /* 初始态：屏幕中央一张牌背 */
   api.openingShowDeck = async function () {
@@ -1189,12 +1219,13 @@ export function createTarotScene(container) {
   /* ---------- 抽牌入场 + 翻转 ---------- */
   api.reveal = async function (cards, onStage) {
     const gsap = window.gsap;
-    const backTex = await loadTexture('cards/back.jpg', anisotropy);
-
-    // 三张牌面并行加载
-    const faces = await Promise.all(
-      cards.map((c) => loadTexture(c.src, anisotropy))
-    );
+    // 缓存优先：命中即用，未命中则并行预热（不阻塞后续动画）
+    backTexPromise = backTexPromise || loadTexture(BACK_SRC, anisotropy);
+    const backTex = texCache[BACK_SRC] || null;
+    const faces = cards.map((c) => texCache[c.src] || null);
+    cards.forEach((c) => {
+      if (!texCache[c.src]) loadTexture(c.src, anisotropy).then((t) => { if (t) texCache[c.src] = t; });
+    });
 
     // 清掉上一轮
     api.clear();
@@ -1218,6 +1249,19 @@ export function createTarotScene(container) {
       card.setOpacity(0);
       cardGroup.add(card.root);
       return card;
+    });
+
+    /* 未命中缓存的牌面/牌背：图到达后补贴（不阻塞动画） */
+    cards.forEach((c, i) => {
+      if (faces[i]) return;
+      loadTexture(c.src, anisotropy).then((t) => {
+        if (!t) return;
+        texCache[c.src] = t;
+        if (current[i] && current[i].setFaceTex) current[i].setFaceTex(t);
+      });
+    });
+    backTexPromise.then((t) => {
+      if (t && current.length) current.forEach((c) => { if (c.setBackTex) c.setBackTex(t); });
     });
 
     if (!gsap) {
@@ -1487,8 +1531,8 @@ export function createTarotScene(container) {
     /* 关键：贴图加载不再阻塞动画。弱网下 loadTexture 最坏要等十几秒，
      * 若在动画前 await，用户会看到"卡住→过一会才播"。改为并行预热：
      * 立刻用已缓存的贴图（没有就先建纯色牌）开播，贴图到达后 setFaceTex 补贴。 */
-    backTexPromise = backTexPromise || loadTexture('cards/back.jpg', anisotropy);
-    const backTex = texCache['cards/back.jpg'] || null;
+    backTexPromise = backTexPromise || loadTexture(BACK_SRC, anisotropy);
+    const backTex = texCache[BACK_SRC] || null;
     const faces = cards.map((c) => texCache[c.src] || null);
     cards.forEach((c) => {
       if (!texCache[c.src]) {
