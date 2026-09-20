@@ -535,7 +535,8 @@ async function burstOldestOrb() {
 }
 
 /* ---------- 首页光球：长按激活 → 半圆弧流光 → 拖出即删除 ---------- */
-const ORB_DELETE_DRAG = 60;        // 拖离原位超过此距离（px）即删除
+const ORB_DELETE_DRAG = 88;        // 拖离原位超过此距离（px）即删除
+const ORB_DRAG_SCALE = 2.4;        // 拖拽态放大倍数（与 CSS --orb-drag-scale 保持一致）
 let orbDel = null;                 // { orb, rec, pid, originX, originY, dx, dy, moved, committed }
 let suppressOrbClick = false;
 
@@ -617,12 +618,14 @@ function liftOrbToBody(orb) {
   if (!orb || orbDel._home) return;
   const r = orb.getBoundingClientRect();
   orbDel._home = { parent: orb.parentNode, next: orb.nextSibling };
+  orbDel._w = r.width; orbDel._h = r.height;   // 记录含 padding 的实测尺寸
   orb.style.position = 'fixed';
   orb.style.left = r.left + 'px';
   orb.style.top = r.top + 'px';
   orb.style.width = r.width + 'px';
   orb.style.height = r.height + 'px';
-  orb.style.margin = '0';
+  orb.style.margin = '0';        // 已用固定定位，清掉负 margin（宽度补上差值即可）
+  orb.style.boxSizing = 'border-box';
   orb.style.zIndex = '60';
   document.body.appendChild(orb);
 }
@@ -639,7 +642,7 @@ function onOrbDeleteMove(e) {
     orbDel.orb.classList.add('is-del-drag');
   }
   if (orbDel.moved) {
-    orbDel.orb.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.28)';
+    orbDel.orb.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + ORB_DRAG_SCALE + ')';
   }
   const dist = Math.hypot(dx, dy);
   if (el.orbDeleteArc) el.orbDeleteArc.classList.toggle('is-danger', dist > ORB_DELETE_DRAG * 0.7);
@@ -689,9 +692,10 @@ function cancelOrbDelete() {
   orb.style.width = '';
   orb.style.height = '';
   orb.style.margin = '';
+  orb.style.boxSizing = '';
   orb.style.zIndex = '';
   if (gsap && !REDUCED) {
-    gsap.fromTo(orb, { x: dx, y: dy, scale: 1.28 },
+    gsap.fromTo(orb, { x: dx, y: dy, scale: ORB_DRAG_SCALE },
       { x: 0, y: 0, scale: 1, duration: 0.32, ease: 'power3.out', onComplete: () => { orb.style.transform = ''; } });
   } else {
     orb.style.transform = '';

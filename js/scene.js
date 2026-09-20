@@ -309,37 +309,43 @@ const loader = new THREE.TextureLoader();
 loader.setCrossOrigin('anonymous');
 
 /* 加载贴图。关键：真机（尤其微信内置浏览器/弱网）图片请求可能「既不 onLoad 也不 onError」
- * 永久挂起，导致 await 永不 resolve → 抽牌死锁在 S.DEAL。这里加硬超时（4s），超时按
- * 缺失处理（resolve(null)，退回纯色牌面），从源头杜绝挂起。 */
-function loadTexture(url, anisotropy) {
+ * 永久挂起，导致 await 永不 resolve → 抽牌死锁在 S.DEAL。这里每次尝试都带硬超时；超时或
+ * 出错都会重试，最多 tries 次；全部失败才 resolve(null)（退回纯色牌面，不阻塞抽牌）。
+ * 超时设 7s、重试 2 次：兼顾弱网偶发挂起与"图其实能加载"。 */
+function loadTexture(url, anisotropy, tries = 2, timeout = 7000) {
   return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(null);            // 超时 → 退回纯色牌面，不阻塞抽牌
-    }, 4000);
-    loader.load(
-      url,
-      (tex) => {
+    let attempt = 0;
+    const tryOnce = () => {
+      if (attempt >= tries) { resolve(null); return; }
+      attempt++;
+      let settled = false;
+      const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = anisotropy;
-        tex.minFilter = THREE.LinearMipmapLinearFilter;
-        tex.magFilter = THREE.LinearFilter;
-        tex.needsUpdate = true;
-        resolve(tex);
-      },
-      undefined,
-      () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(null);          // 贴图缺失时不阻塞，退回纯色牌面
-      }
-    );
+        tryOnce();                      // 超时 → 重试
+      }, timeout);
+      loader.load(
+        url,
+        (tex) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = anisotropy;
+          tex.minFilter = THREE.LinearMipmapLinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          tex.needsUpdate = true;
+          resolve(tex);
+        },
+        undefined,
+        () => {
+          if (settled) return;
+          settled = true;
+          tryOnce();                    // 出错 → 重试
+        }
+      );
+    };
+    tryOnce();
   });
 }
 
@@ -412,6 +418,16 @@ function buildCard(backTex, faceTex, anisotropy) {
   return {
     root, flipper, spin, materials,
     faceTex, backTex,
+    /* 牌面图迟到时（首抽超时/null）补贴：自动把纯色牌面换成真实卡图 */
+    setFaceTex(tex) {
+      faceTex = tex;
+      faceMat.map = tex;
+      faceMat.emissiveMap = tex;
+      faceMat.color.set(0xffffff);
+      faceMat.emissive.set(0xffffff);
+      faceMat.emissiveIntensity = 0.46;
+      faceMat.needsUpdate = true;
+    },
     setOpacity(v) {
       materials.forEach((m) => { m.opacity = v; });
       root.visible = v > 0.001;
@@ -1516,6 +1532,16 @@ export function createTarotScene(container) {
         wheelLastOp[i] = -1;
       }
       return card;
+    });
+
+    /* 首抽时若某张牌面因弱网超时被判缺失（null），后台继续重试加载，
+     * 图一旦到达就补贴到牌面，避免"卡牌图读不出来"一直空白。 */
+    faces.forEach((f, i) => {
+      if (!f && current[i] && current[i].setFaceTex) {
+        loadTexture(cards[i].src, anisotropy, 2, 7000).then((tex) => {
+          if (tex && current[i] && current[i].setFaceTex) current[i].setFaceTex(tex);
+        });
+      }
     });
 
     /* 目标：滚筒槽位（角度已由 app.js 归零 → 第 0 张居中） */
