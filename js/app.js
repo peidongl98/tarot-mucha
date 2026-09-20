@@ -1786,17 +1786,21 @@ function liftField() {
   field.dataset.lifted = '1';
   document.body.appendChild(field);
   /* 搬家必然让 input 失焦，必须还回去 —— 否则用户按键盘自带收起键时
-   * input 已不在焦点，blur 不触发，键盘态就永久残留（"只能点键盘外面"）。 */
+   * input 已不在焦点，blur 不触发，键盘态就永久残留（"只能点键盘外面"）。
+   * 注意：**只有 liftField 需要补偿焦点**。dropField（键盘收起路径）绝不能
+   * focus —— 那会在键盘刚被系统收起时立刻把它拉回来，正是
+   * "聚焦态键盘收不回来"的成因。 */
   if (hadFocus && el.question) {
     try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ }
   }
   window.setTimeout(() => { moving = false; }, 0);
 }
 
+/* 收起键盘态：只把输入框搬回原位 + 清内联定位。
+ * **不碰焦点** —— 收起路径上的任何 focus() 都会把刚收起的键盘重新拉起。 */
 function dropField() {
   const field = el.openingField;
   if (!field || field.dataset.lifted !== '1') return;
-  const hadFocus = document.activeElement === el.question;
   moving = true;
   delete field.dataset.lifted;
   const cluster = document.querySelector('.ask-cluster');
@@ -1806,9 +1810,10 @@ function dropField() {
   field.style.left = '';
   field.style.width = '';
   field.style.top = '';
-  if (hadFocus && el.question) {
-    try { el.question.focus({ preventScroll: true }); } catch (e) { /* 忽略 */ }
-  }
+  /* 搬家会让 input 真正失焦（DOM 移动必然掉焦点）。这里不能 focus 回去
+   * （那就等于把刚收起的键盘又拉起），所以只把"焦点态"这个 UI 状态同步掉，
+   * 否则 input-focused 残留 → 页面一直压暗。 */
+  if (document.activeElement !== el.question) setInputFocused(false);
   window.setTimeout(() => { moving = false; }, 0);
 }
 
