@@ -35,8 +35,6 @@ const LEGACY_KEY = 'tarot_history';
 
 const HOLD_MS = 1100;          // 长按返回光球的时长
 const DRAG_SLOP = 12;          // 按下到抬起的位移阈值（px）：超过就算拖动，不算点击
-const SWIPE_MIN = 46;          // 触发上滑 / 下滑的最小竖直位移
-const SWIPE_MAX_MS = 700;      // 手势最长时间
 
 /* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互）。
  * 交互 = 点击左右发光三角形换牌（无拖动、无滚轮、无滑动）。 */
@@ -63,7 +61,6 @@ let records = [];              // localStorage 里的记录（旧 → 新）
 let currentAt = null;          // 当前会话对应的记录时间戳（历史恢复时非空）
 let fromHistory = false;       // 当前会话是否来自历史回看
 let deckPressAt = null;
-let touchStart = null;
 let holdTimer = null;
 
 /* ============================================================
@@ -744,21 +741,8 @@ function hideMeaning() {
   el.cardRead.classList.remove('is-on');
 }
 
-/* 底部星光引导 + 滚动提示（三张都翻开后一起出现） */
-function buildStarHint() {
-  if (!el.starHint || el.starHint.childElementCount) return;
-  for (let i = 0; i < 15; i++) {
-    const s = elNew('i');
-    s.style.setProperty('--dx', ((i - 7) * 7) + 'px');
-    s.style.animationDelay = (i * 0.19) + 's';
-    el.starHint.appendChild(s);
-  }
-}
-
-function showStarHint(on) {
-  if (el.starHint) el.starHint.classList.toggle('is-on', !!on);
-  if (el.scrollHint) el.scrollHint.classList.toggle('is-on', !!on);
-}
+/* 底部引导占位：滑动手势已移除，Sink 光圈在下一提交接管这些调用点 */
+function showStarHint(on) { void on; }
 
 /* ============================================================
  * 阶段 3：上滑 → 解读
@@ -960,56 +944,6 @@ async function askAi() {
     clearTimeout(timer);
     aiBusy = false;
     setAiThinking(false);
-  }
-}
-
-/* ============================================================
- * 滚轮 / 滑动
- *   滚筒（三张牌）→ 滚轮任意方向都进入解读（宽容）；拖动 / 吸附中不触发
- *   解读视图     → 只有向下滚才返回（文字区先滚文字，滚到顶再退）
- *   其他状态     → 滚轮不触发任何切换
- * ============================================================ */
-
-function canAdvance() {
-  return state === S.ROW && wheelResting();
-}
-
-function onWheel(e) {
-  if (canAdvance()) {
-    if (Math.abs(e.deltaY) > 4) enterReading();
-    return;
-  }
-  if (state === S.READING && e.deltaY > 4) {
-    // 解读区是独立滚动容器：内容没滚到底就不退出（原生滚动负责容器内部）
-    const t = el.aiText;
-    if (t && t.scrollHeight > t.clientHeight + 2 && t.scrollTop + t.clientHeight < t.scrollHeight - 2) return;
-    exitReading();
-  }
-}
-
-function onTouchStart(e) {
-  const t = e.touches[0];
-  touchStart = {
-    x: t.clientX, y: t.clientY, at: Date.now(),
-    inText: !!(e.target.closest && e.target.closest('#aiText')),
-  };
-}
-
-function onTouchEnd(e) {
-  if (!touchStart) return;
-  const t = e.changedTouches[0];
-  const dy = t.clientY - touchStart.y;
-  const dx = t.clientX - touchStart.x;
-  const dt = Date.now() - touchStart.at;
-  const isSwipe = Math.abs(dy) > SWIPE_MIN && Math.abs(dy) > Math.abs(dx) * 1.15 && dt < SWIPE_MAX_MS;
-  const start = touchStart;
-  touchStart = null;
-  if (!isSwipe) return;
-
-  if (dy < 0 && canAdvance()) { enterReading(); return; }   // 上滑：滚筒 → 解读（宽容，不要求全翻开）
-  if (dy > 0 && state === S.READING) {
-    if (start.inText && el.aiText.scrollTop > 2) return;   // 先把文字滚回顶部
-    exitReading();
   }
 }
 
@@ -1473,8 +1407,6 @@ function cacheDom() {
   el.readKeys = document.getElementById('readKeys');
   el.readText = document.getElementById('readText');
 
-  el.starHint = document.getElementById('starHint');
-  el.scrollHint = document.getElementById('scrollHint');
   el.wheelLabel = document.getElementById('wheelLabel');
   el.readingView = document.getElementById('readingView');
   el.aiRing = document.getElementById('aiRing');
@@ -1510,7 +1442,6 @@ function init() {
   /* ---- 顶部光球 ---- */
   records = readOrbs();
   renderOrbs(records);
-  buildStarHint();
 
   /* ---- 事件 ---- */
   if (el.deckHit) {
@@ -1559,10 +1490,6 @@ function init() {
       restoreRecord(rec);
     });
   }
-
-  window.addEventListener('wheel', onWheel, { passive: true });
-  window.addEventListener('touchstart', onTouchStart, { passive: true });
-  window.addEventListener('touchend', onTouchEnd, { passive: true });
 
   /* ---- 视口锁定 + 键盘自适应 ----
    * 键盘弹出（宽不变、高骤缩）时：不 resize 场景、不挤布局，
