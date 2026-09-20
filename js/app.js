@@ -361,7 +361,11 @@ function addHidden(at) {
   if (!at) return;
   const s = loadHidden();
   s.add(String(at));
-  try { localStorage.setItem(ORBS_HIDDEN_KEY, JSON.stringify(Array.from(s))); } catch (e) { /* 忽略 */ }
+  saveHidden(s);
+}
+
+function saveHidden(set) {
+  try { localStorage.setItem(ORBS_HIDDEN_KEY, JSON.stringify(Array.from(set || []))); } catch (e) { /* 忽略 */ }
 }
 
 /* 匿名设备标识：本地生成一次，存 localStorage；云端按此隔离记录，无需登录 */
@@ -402,12 +406,14 @@ function cloudPush(rec) {
   } catch (e) { /* 忽略：本地优先 */ }
 }
 
-function cloudDelete(at) {
+/* 本地删除的云端落点：标记 hidden=1（记录不删，线上一直在）。
+ * 隐藏集持久化到云端，因此清本地缓存后 cloudPull 仍会排除该条 —— 与本地解绑。 */
+function cloudHide(at) {
   if (!at) return;
   const url = ORBS_API + '?device_id=' + encodeURIComponent(getDeviceId()) +
     '&at=' + encodeURIComponent(String(at));
   try {
-    fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+    fetch(url, { method: 'PATCH', keepalive: true }).catch(() => {});
   } catch (e) { /* 忽略 */ }
 }
 
@@ -606,7 +612,8 @@ function commitOrbDelete() {
   }
   records = records.filter((x) => String(x.at) !== String(rec.at));
   writeOrbs(records);
-  addHidden(rec.at);                    // 仅本地隐藏（不删云端）：线上记录一直在
+  addHidden(rec.at);                    // 本地隐藏集（无云端时降级也生效）
+  cloudHide(rec.at);                   // 云端标 hidden=1：清缓存也不复活
   hideOrbArc();
   if (orb && orb.parentNode) orb.parentNode.removeChild(orb);   // 移除被拖出的副本（renderOrbs 重建）
   orbDel = null;
@@ -1715,7 +1722,10 @@ function init() {
    *    仅本地存在、云端没有的记录补推上云（迁移绑定前历史）；云端记录永不删除。 */
   cloudPull().then((orbs) => {
     if (!orbs) return;                       // 无云端：纯本地
+    /* 云端 hidden 标记合并进本地隐藏集 → 清缓存后 cloudPull 仍能据此排除，与本地解绑 */
     const hidden = loadHidden();
+    orbs.forEach((r) => { if (r && r.hidden) hidden.add(String(r.at)); });
+    saveHidden(hidden);
     const cloudAts = new Set(orbs.map((r) => String(r && r.at)));
     const byAt = new Map();
     records.forEach((r) => { if (r && r.at && !hidden.has(String(r.at))) byAt.set(String(r.at), r); });
