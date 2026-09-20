@@ -1342,6 +1342,64 @@ function tickOverlay() {
 }
 
 /* ============================================================
+ * 输入区自适应：固定三行高；三行内正常字号；超出逐步缩字号；
+ * 缩到下限仍放不下 → 允许滚动。文字始终居中（水平 CSS，垂直动态补白）。
+ * ============================================================ */
+
+const Q_FONT_MAX = 22;
+const Q_FONT_MIN = 13.5;
+const Q_FONT_STEP = 0.5;
+const Q_LINES = 3;
+const Q_LINE_RATIO = 1.5;
+
+/* 按当前字号把输入框高度精确设为三行（字号随 vw clamp，resize 后需重算） */
+function setupQuestionBox() {
+  const ta = el.question;
+  if (!ta) return;
+  const fs = parseFloat(getComputedStyle(ta).fontSize) || Q_FONT_MAX;
+  ta.style.height = Math.round(fs * Q_LINE_RATIO * Q_LINES) + 'px';
+  fitQuestion();
+}
+
+function fitQuestion() {
+  const ta = el.question;
+  if (!ta) return;
+  const boxH = ta.clientHeight;
+  const fits = () => ta.scrollHeight <= boxH + 1;
+  let fs = parseFloat(getComputedStyle(ta).fontSize) || Q_FONT_MAX;
+  ta.style.fontSize = fs.toFixed(1) + 'px';
+
+  /* 垂直居中：清掉上下补白量内容行数，再把剩余空间对称补回 */
+  const center = () => {
+    ta.style.paddingTop = '0px';
+    ta.style.paddingBottom = '0px';
+    const lh = fs * Q_LINE_RATIO;
+    const lines = Math.max(1, Math.round(ta.scrollHeight / lh));
+    const pad = Math.max(0, (boxH - lines * lh) / 2);
+    ta.style.paddingTop = pad.toFixed(1) + 'px';
+    ta.style.paddingBottom = pad.toFixed(1) + 'px';
+    return lines;
+  };
+  center();
+  let guard = 0;
+  while (!fits() && fs > Q_FONT_MIN && guard < 24) {
+    fs = Math.max(Q_FONT_MIN, fs - Q_FONT_STEP);
+    ta.style.fontSize = fs.toFixed(1) + 'px';
+    center();
+    guard++;
+  }
+  if (fits()) {
+    ta.style.overflowY = 'hidden';
+    ta.scrollTop = 0;
+  } else {
+    /* 最小字号仍放不下：允许滚动，补白收到最小，首行与末行都留呼吸 */
+    ta.style.overflowY = 'auto';
+    ta.style.paddingTop = '3px';
+    ta.style.paddingBottom = '3px';
+  }
+}
+
+/* ============================================================
  * 视口锁定 + 键盘自适应（visualViewport）
  * 主布局与 3D 画布的高度锁定在「无键盘视口高」（--vph），
  * 键盘弹出（宽不变、高骤缩）不触发 resize，只上浮输入区。
@@ -1392,6 +1450,7 @@ function onViewportChange() {
   lockViewport();
   measureField();
   handleKeyboard();
+  setupQuestionBox();
   if (scene && scene.ok) scene.resize();
 }
 
@@ -1399,6 +1458,7 @@ function setupViewport() {
   lockViewport();
   measureField();
   handleKeyboard();
+  setupQuestionBox();
 
   window.addEventListener('resize', onViewportChange);
   window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 240));
@@ -1492,7 +1552,15 @@ function init() {
   el.hits.forEach((n, i) => { if (n) n.addEventListener('click', () => onCardHit(i)); });
   if (el.ringBtn) el.ringBtn.addEventListener('click', startDraw);
   if (el.question) {
-    el.question.addEventListener('input', syncRing);
+    /* textarea：禁止换行（粘贴的多行折叠成空格），输入即同步流光/光圈与自适应 */
+    el.question.addEventListener('input', () => {
+      const v = el.question.value;
+      if (/\r?\n/.test(v)) {
+        el.question.value = v.replace(/\r?\n/g, ' ');
+      }
+      syncRing();
+      fitQuestion();
+    });
     el.question.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); startDraw(); }
     });

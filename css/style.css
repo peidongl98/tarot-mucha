@@ -305,6 +305,7 @@ body.kb-on .opening-ring {
 .opening-input {
   display: block;
   width: 100%;
+  height: 78px;                 /* 固定三行高（init 时 JS 按实际字号精确校准） */
   padding: 4px 0;
   font-family: var(--font-display);
   font-size: clamp(17px, 2.5vw, 22px);
@@ -318,6 +319,8 @@ body.kb-on .opening-ring {
   outline: none;
   box-shadow: none;
   caret-color: var(--gold);      /* 光标可见，用香槟金 */
+  resize: none;
+  overflow: hidden;
   -webkit-appearance: none;
   appearance: none;
 }

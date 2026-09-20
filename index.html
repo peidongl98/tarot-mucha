@@ -98,10 +98,10 @@
   <!-- 2. 神秘问句 -->
   <p class="opening-question" id="openingQuestion">Whisper your question…</p>
 
-  <!-- 3. 无框输入框（下方一条流光：空态慢而暗，有字快而亮） -->
+  <!-- 3. 无框输入区（textarea：固定三行高，超出逐步缩字号，仍放不下再滚动；下方流光） -->
   <div class="opening-field">
-    <input id="question" class="opening-input" type="text" maxlength="200"
-      autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="你想问什么">
+    <textarea id="question" class="opening-input" maxlength="200" rows="1"
+      autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="你想问什么"></textarea>
     <span class="field-stream" aria-hidden="true"><i></i></span>
   </div>
 
