@@ -1110,25 +1110,35 @@ function clearAiText() {
   el.aiText.classList.remove('is-on');
 }
 
+/* 免责声明文案：模型输出、前端兜底、流式剥离三处共用同一份常量，
+ * 改文案时只改这里，不会漏改。 */
+const NOTE_EN = 'For entertainment reference only.';
+const NOTE_CN = '以上解读仅供娱乐参考';
+const STREAM_NOTES = [NOTE_EN, NOTE_CN];
+
 /* 解读分语种：先按空行分段（段内偶发的软换行合并回一段），
  * 再按语言归类 —— 含 ≥2 个 CJK 字符的段归中文，其余归英文。
  * 旧记录是纯中文，走同一路径（英文组为空 → 只显示中文）。 */
 function splitReading(text) {
-  const NOTE_EN = 'For entertainment reference only.';
-  const NOTE_CN = '以上解读仅供娱乐参考';
   const blocks = String(text)
     .split(/\r?\n\s*\r?\n/)                       // 空行 = 段落边界
     .map((b) => {
-      const joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ').trim();
+      let joined = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join(' ').trim();
       if (!joined) return null;
-      // 免责句可能在块尾（与正文同一块）或自己就是一块 —— 从块尾摘出
-      if (joined.endsWith(NOTE_EN)) {
-        return { text: joined.slice(0, joined.length - NOTE_EN.length).trim(), note: NOTE_EN };
+      /* 免责句可能出现在块尾，且两条（英文+中文）常常挨在同一个块里
+       * （模型把 "For entertainment reference only." 与 "以上解读仅供娱乐参考"
+       * 连写在末尾）。所以要从后往前反复摘，直到块尾不再是免责句为止，
+       * 否则先匹配到中文那条、英文那条就残留在正文里。 */
+      const notes = [];
+      for (;;) {
+        const hit = STREAM_NOTES.find((n) => joined.endsWith(n));
+        if (!hit) break;
+        notes.unshift(hit);
+        joined = joined.slice(0, joined.length - hit.length).trim();
       }
-      if (joined.endsWith(NOTE_CN)) {
-        return { text: joined.slice(0, joined.length - NOTE_CN.length).trim(), note: NOTE_CN };
-      }
-      return { text: joined, note: '' };
+      const note = notes[0] || '';
+      if (!joined) return notes.length ? { text: '', note } : null;
+      return { text: joined, note };
     })
     .filter(Boolean);
 
@@ -1206,8 +1216,8 @@ function showAiText(text, streaming) {
   en.forEach((t) => gEn.appendChild(elNew('p', 'ai-en', t)));
   cn.forEach((t) => gCn.appendChild(elNew('p', null, t)));
   // 免责声明前端兜底：模型偶发漏写时自动补上（extract 到了就用模型的，保证不重复）
-  gEn.appendChild(elNew('p', 'ai-note ai-note-en', r.enNote || 'For entertainment reference only.'));
-  gCn.appendChild(elNew('p', 'ai-note', r.cnNote || '以上解读仅供娱乐参考'));
+  gEn.appendChild(elNew('p', 'ai-note ai-note-en', r.enNote || NOTE_EN));
+  gCn.appendChild(elNew('p', 'ai-note', r.cnNote || NOTE_CN));
   if (gEn.childElementCount) el.aiText.appendChild(gEn);
   if (gCn.childElementCount) el.aiText.appendChild(gCn);
   el.aiText.classList.add('is-on');
@@ -1239,15 +1249,36 @@ let aiStreamEls = null;
  * 每帧最多渲染 FADE_MAX 个新字符，避免一次涌入时整屏闪。 */
 const FADE_MAX = 14;
 
+/* 流式期间要摘掉的免责句（STREAM_NOTES 定义见上方常量区）。
+ * 模型把英文免责句写在英文段末尾、中文免责句写在中文段末尾；
+ * 但流式切分是按「首个中文字符」判中英的，英文免责句属于纯英文 → 会被算进英文正文，
+ * 视觉上英文组就多出一条（终稿里它是单独一行的 .ai-note）。
+ * 因此在流式阶段先把免责句从正文里剥离，不给它们建流式节点。 */
+function stripStreamNotes(text) {
+  let s = String(text);
+  for (let i = 0; i < STREAM_NOTES.length; i++) {
+    const n = STREAM_NOTES[i];
+    let idx = s.indexOf(n);
+    while (idx >= 0) {                       // 反复剥离（模型偶发重复输出）
+      s = s.slice(0, idx) + s.slice(idx + n.length);
+      idx = s.indexOf(n);
+    }
+  }
+  return s;
+}
+
 function appendStream(els, fullText) {
   /* 首次以英文开头、之后遇中文切到中文段；用"首个中文字符"作为分界 */
+  const clean = stripStreamNotes(fullText);
   const splitAt = (() => {
-    const m = fullText.search(/[\u4e00-\u9fff]/);
-    return m < 0 ? fullText.length : m;
+    const m = clean.search(/[\u4e00-\u9fff]/);
+    return m < 0 ? clean.length : m;
   })();
-  const enPart = fullText.slice(0, splitAt);
-  const cnPart = splitAt < fullText.length ? fullText.slice(splitAt) : '';
+  const enPart = clean.slice(0, splitAt);
+  const cnPart = splitAt < clean.length ? clean.slice(splitAt) : '';
 
+  /* 免责句被摘掉后句子可能变短（比如重跑时 text 变短），
+   * 此时只做「新增追加」，不回退已渲染内容，避免闪断。 */
   if (enPart.length > els.en.length) {
     const add = enPart.slice(els.en.length);
     els.en = enPart;
