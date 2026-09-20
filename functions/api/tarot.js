@@ -285,26 +285,38 @@ async function respondStream(key, messages, style) {
   let full = '';
 
   const out = new ReadableStream({
-    start(controller) {
+    /* 用 start() 内的异步循环推送，而不是 pull()：
+     * Pages/Workers 对 pull 驱动的流在“上游 reader 与 pull 交错”时可能提前收尾，
+     * 实测 done 事件会丢。start 里 await 循环 + 末尾 close 最稳。 */
+    async start(controller) {
       controller.enqueue(sse({ event: 'start', model: usedModel }));
-    },
-    async pull(controller) {
       try {
-        const { done, value } = await reader.read();
-        if (done) {
-          controller.enqueue(sse({ event: 'done', reading: full.trim(), model: usedModel }));
-          controller.close();
-          return;
-        }
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';         // 末行可能被截断，留到下轮
-        for (const line of lines) {
-          const delta = parseGlmChunk(line.trim());
-          if (delta) {
-            full += delta;
-            controller.enqueue(sse({ event: 'delta', text: delta }));
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';       // 末行可能被截断，留到下轮
+          for (const line of lines) {
+            const delta = parseGlmChunk(line.trim());
+            if (delta) {
+              full += delta;
+              controller.enqueue(sse({ event: 'delta', text: delta }));
+            }
           }
+        }
+        /* 收尾：flush 解码器残留 + 处理最后一行 */
+        buf += decoder.decode();
+        const tailDelta = parseGlmChunk(buf.trim());
+        if (tailDelta) {
+          full += tailDelta;
+          controller.enqueue(sse({ event: 'delta', text: tailDelta }));
+        }
+
+        if (full.trim()) {
+          controller.enqueue(sse({ event: 'done', reading: full.trim(), model: usedModel }));
+        } else {
+          controller.enqueue(sse({ event: 'error', error: '这次没能读出内容，请再试一次。' }));
         }
       } catch (e) {
         // 上游中途断开：已有内容就地收尾，不报错（用户已看到部分正文）
@@ -313,8 +325,8 @@ async function respondStream(key, messages, style) {
         } else {
           controller.enqueue(sse({ event: 'error', error: '解读中途断开，请再试一次。' }));
         }
-        try { controller.close(); } catch (e2) {}
       }
+      try { controller.close(); } catch (e2) {}
     },
     cancel() {
       try { reader.cancel(); } catch (e) {}
