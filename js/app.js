@@ -1170,7 +1170,20 @@ function playAiRipple() {
   window.setTimeout(() => rip.remove(), 2800);
 }
 
-function showAiText(text, instant) {
+function showAiText(text, streaming) {
+  /* 流式增量：用单个 <p> 承载纯文本、pre-wrap 保留换行。
+   * 不走 splitReading 分段 + 逐段动画——每帧重排会抖动，且滚动会跳。
+   * 流结束后再调一次本函数（streaming=false）做终稿完整排版。 */
+  if (streaming) {
+    el.aiText.classList.add('streaming');
+    el.aiText.textContent = '';
+    const p = elNew('p', 'ai-stream', text);
+    el.aiText.appendChild(p);
+    el.aiText.classList.add('is-on');
+    return;
+  }
+  el.aiText.classList.remove('streaming');
+
   const r = splitReading(text);
   const en = r.en;
   const cn = r.cn;
@@ -1190,7 +1203,7 @@ function showAiText(text, instant) {
   const gsap = window.gsap;
   const ps = Array.prototype.slice.call(el.aiText.querySelectorAll('p'));
 
-  if (instant || REDUCED || !gsap || !ps.length) {
+  if (REDUCED || !gsap || !ps.length) {
     setAiRingVisible(false);
     return;
   }
@@ -1223,6 +1236,7 @@ async function askAi() {
   el.aiText.appendChild(elNew('p', 'ai-note', 'Reading the cards…'));
 
   const payload = {
+    stream: true,                                     // 走 SSE：首字 1–2s 内可见
     question: lastQuestion,
     cards: lastReading.map((c) => {
       const meta = TAROT_BY_ID[c.id];
@@ -1248,25 +1262,69 @@ async function askAi() {
   try {
     const res = await fetch('/api/tarot', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
-    let data = null;
-    try { data = await res.json(); } catch (e) { data = null; }
-    if (!res.ok || !data || !data.success || !data.reading) {
-      showAiError((data && data.error) || 'The reading is unavailable right now. Please try again later.');
+
+    const ctype = res.headers.get('Content-Type') || '';
+
+    /* 老路：整包 JSON（Function 未升级 / 不支持流式时的兜底） */
+    if (ctype.indexOf('text/event-stream') < 0 || !res.body) {
+      let data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      if (!res.ok || !data || !data.success || !data.reading) {
+        showAiError((data && data.error) || 'The reading is unavailable right now. Please try again later.');
+        return;
+      }
+      lastAiText = data.reading;
+      showAiText(data.reading);
+      persistReading(fromHistory);
       return;
     }
-    lastAiText = data.reading;
-    showAiText(data.reading);
-    // 历史回看里重新解读 → 更新那条记录
-    if (fromHistory && currentAt != null) {
-      let updated = null;
-      records = records.map((r) => (r.at === currentAt ? (updated = Object.assign({}, r, { reading: lastAiText })) : r));
-      writeOrbs(records);
-      if (updated) cloudPush(updated);   // 重新解读 → 云端同步更新该条
+
+    /* 流式：边收边渲染。streamStart 标记是否已把"思考中"换成正文。 */
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let acc = '';
+    let started2 = false;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const t = line.trim();
+        if (t.indexOf('data:') !== 0) continue;
+        let ev = null;
+        try { ev = JSON.parse(t.slice(5).trim()); } catch (e) { continue; }
+        if (!ev) continue;
+
+        if (ev.event === 'error') {
+          if (!started2) { showAiError(ev.error || 'The reading is unavailable right now. Please try again later.'); return; }
+          break;
+        }
+        if (ev.event === 'delta' && ev.text) {
+          acc += ev.text;
+          started2 = true;
+          setAiThinking(false);              // 首字到达即撤掉"思考中"动画
+          showAiText(acc, true);             // 增量模式：不重排、不滚到底，避免跳动
+        } else if (ev.event === 'done') {
+          if (ev.reading) acc = ev.reading;  // 以完整结果为准，兜底修正
+        }
+      }
     }
+
+    if (!acc.trim()) {
+      showAiError('The reading came back empty. Please try again.');
+      return;
+    }
+    lastAiText = acc.trim();
+    showAiText(lastAiText);                  // 终稿：走完整排版（分段 + 双语归组）
+    persistReading(fromHistory);
   } catch (e) {
     if (e && e.name === 'AbortError') showAiError('The reading timed out. The model is busy — please try again shortly.');
     else showAiError('Network trouble — the reading service could not be reached. Please check your connection and retry.');
@@ -1275,6 +1333,15 @@ async function askAi() {
     aiBusy = false;
     setAiThinking(false);
   }
+}
+
+/* 解读落库 + 历史回看里的重新解读同步更新该条 */
+function persistReading(fromHistory) {
+  if (!fromHistory || currentAt == null) return;
+  let updated = null;
+  records = records.map((r) => (r.at === currentAt ? (updated = Object.assign({}, r, { reading: lastAiText })) : r));
+  writeOrbs(records);
+  if (updated) cloudPush(updated);
 }
 
 /* ============================================================

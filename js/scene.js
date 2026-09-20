@@ -104,6 +104,10 @@ const COLOR_GOLD = 0xc9a961;
 const COLOR_INK = 0x0a0908;
 const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+/* 每帧驱动的轻量更新器（牌边呼吸光等），由 tick() 统一调用 */
+const glowTweens = [];
+let glowLastT = 0;
+
 /* ============================================================
  * 工具
  * ============================================================ */
@@ -381,11 +385,91 @@ function buildCard(backTex, faceTex, anisotropy) {
   // 金属描边：细金线（WebGL 线宽固定 1px，正合"细"的要求）
   const edgeGeo = new THREE.EdgesGeometry(slabGeo);
   const edgeMat = new THREE.LineBasicMaterial({
-    color: COLOR_GOLD, transparent: true, opacity: 0.55,
+    color: COLOR_GOLD, transparent: true, opacity: 0.62,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   materials.push(edgeMat);
   spin.add(new THREE.LineSegments(edgeGeo, edgeMat));
+
+  /* 微弱边光：用 Canvas 生成一张「中间镂空、边缘柔化发光」的贴图，
+   * 贴在一个略大于牌面的平面上，加色混合叠加。
+   * 相比 4 条发光条：四角自然衔接、光晕沿轮廓均匀扩散、不会露出方块转角。 */
+  const glowMats = [];
+  const glowGroup = new THREE.Group();
+
+  const glowTex = (() => {
+    const S = 512;                                  // 纹理边长（发光边缘需要足够分辨率）
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const g = c.getContext('2d');
+    /* 牌面区域对应的内矩形：与 GLOW_SCALE 配套（内矩形占纹理比例 = 1/GLOW_SCALE）。
+     * 外缘余量 pad 必须明显大于最大 blur 半径，否则光晕会被纹理边界裁掉。 */
+    const GS = 1.5;
+    const pad = S * (1 - 1 / GS) / 2;
+    const x = pad, y = pad, w = S - pad * 2, h = S - pad * 2;
+
+    g.clearRect(0, 0, S, S);
+    /* 注意：不能用 globalCompositeOperation='lighter'，它会让 shadowBlur 在空白画布上
+     * 完全画不出东西（阴影需以实体像素为源参与合成）。用默认 source-over，
+     * 多层描边自然叠加成更亮的边缘。 */
+    /* 用带阴影描边的矩形一次性生成沿轮廓均匀外扩的柔光（阴影天然在四周对称扩散）。
+     * 三层不同 blur 半径 → 近处锐、远处散。半径均 < pad(85px) 的近半，避免被纹理边界裁掉；
+     * 半径太小会让光晕在屏幕上不足 1px（等于没有），这里给足扩散距离。 */
+    const layers = [
+      { blur: S * 0.012, alpha: 0.90, line: 0.85 },   // 紧贴边缘的亮线
+      { blur: S * 0.032, alpha: 0.62, line: 0.55 },   // 近距扩散
+      { blur: S * 0.075, alpha: 0.34, line: 0.30 },   // 中距雾化
+    ];
+    layers.forEach((L) => {
+      g.save();
+      g.shadowColor = 'rgba(220,188,118,' + L.alpha + ')';
+      g.shadowBlur = L.blur;
+      g.strokeStyle = 'rgba(220,188,118,' + L.line + ')';
+      g.lineWidth = Math.max(2, S * 0.006);
+      // 描边矩形时阴影向两侧扩散，正好覆盖内缘（被牌面遮住）与外缘
+      g.strokeRect(x, y, w, h);
+      g.restore();
+    });
+
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    return t;
+  })();
+
+  const glowMat = new THREE.MeshBasicMaterial({
+    map: glowTex,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  glowMats.push(glowMat);
+
+  /* 平面比牌面大一圈：内矩形（描边处）正好落在牌缘，外扩部分即光晕 */
+  const GLOW_SCALE = 1.5;
+  const glowMesh = new THREE.Mesh(new THREE.PlaneGeometry(CARD_W * GLOW_SCALE, CARD_H * GLOW_SCALE), glowMat);
+  glowGroup.add(glowMesh);
+
+  glowGroup.position.z = CONFIG.cardDepth / 2 + 0.006;   // 牌面之前，避免被不透明牌面遮挡
+  glowGroup.renderOrder = 2;
+  spin.add(glowGroup);
+
+  // 呼吸：缓慢明灭，不抢视线
+  let glowAlpha = 1;                     // 由 setOpacity 驱动（出场淡入淡出）
+  /* 强度定标：本地 4.0 = 明显雾状（过），0.4 = 几乎不可见（过弱）。
+   * 1.6 落在"暗背景里能看出柔光、但不抢牌面"的区间。 */
+  const GLOW_STRENGTH = 1.6;
+  const glowClock = { t: Math.random() * Math.PI * 2 };
+  const glowUpdate = (dt) => {
+    glowClock.t += dt;
+    const k = 0.82 + 0.18 * Math.sin(glowClock.t * 1.05);   // 幅度收窄 → "微弱"
+    glowMats.forEach((m) => { m.opacity = GLOW_STRENGTH * k * glowAlpha; });
+    edgeMat.opacity = 0.62 * (0.9 + 0.1 * k) * glowAlpha;
+  };
+  glowTweens.push(glowUpdate);
 
   const halfD = CONFIG.cardDepth / 2 + 0.0012;
 
@@ -449,6 +533,8 @@ function buildCard(backTex, faceTex, anisotropy) {
     },
     setOpacity(v) {
       materials.forEach((m) => { m.opacity = v; });
+      /* 边光跟着牌一起淡入淡出，但保留自己的呼吸系数（见 glowUpdate） */
+      glowAlpha = v;
       root.visible = v > 0.001;
     },
     dispose() {
@@ -1149,6 +1235,13 @@ export function createTarotScene(container) {
     raf = requestAnimationFrame(tick);
 
     const t = clock.getElapsedTime();
+
+    // 牌边呼吸光等轻量更新器（REDUCED 时跳过动画，保持常亮）
+    if (glowTweens.length && !REDUCED) {
+      const dt = glowLastT ? Math.min(0.05, t - glowLastT) : 1 / 60;
+      glowLastT = t;
+      for (let gi = 0; gi < glowTweens.length; gi++) glowTweens[gi](dt);
+    }
 
     // 粒子流动
     particles.material.uniforms.uTime.value = t;

@@ -1063,6 +1063,32 @@ body.no-3d .card-hit img { visibility: visible; }
 .ai-text .ai-note-en { font-family: var(--font-display); letter-spacing: 0.06em; }
 .ai-text .ai-error { color: #E0C9A6; }
 
+/* 流式增量态：单个 <p> 承载全部文本，pre-wrap 保留模型换行；
+ * 末尾跟一个呼吸光标，落字时不做任何位移动画（避免抖动）。 */
+.ai-text.streaming { display: flex; align-items: flex-start; justify-content: center; }
+
+.ai-text .ai-stream {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-text.streaming .ai-stream::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.14em;
+  background: linear-gradient(180deg, rgba(233, 207, 152, 0.9), rgba(233, 207, 152, 0.15));
+  animation: aiCaret 1.15s ease-in-out infinite;
+}
+
+@keyframes aiCaret {
+  0%, 45% { opacity: 0.85; }
+  55%, 100% { opacity: 0.12; }
+}
+
 /* ---------- 中英双语分组：英文在上（辅助），中文在下（主） ---------- */
 .ai-group-en { margin: 0 0 30px; }          /* 两组之间留白明显 */
 

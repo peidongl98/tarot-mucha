@@ -36,8 +36,10 @@ const RETRY_DELAYS = [900, 1800];
  * 主模型 9s：它正常只需 4–6s，超时说明正被限流，尽快让位给备用模型，
  * 而不是一口吃掉全部预算（实测会造成最终 504）。
  * 备用模型 16s：它是最后一关，给足时间。 */
-/* 主模型 15s：双语正常 8–14s；备用模型 22s：它是最后一关，给足时间。 */
-const MODEL_CAPS = [15000, 22000];
+/* 主模型 8s：它正常只需 4–6s，超时说明正被限流，尽快让位给备用模型，
+ * 而不是白等 15s 把总耗时拖到 25s（实测 15s 上限导致最坏 25.7s）。
+ * 备用模型 22s：它是最后一关，给足时间。 */
+const MODEL_CAPS = [8000, 22000];
 
 /* 多风格彩蛋：每次随机抽取一种 SYSTEM_PROMPT；可选 body.style 强制指定（便于触发/调试）。
  * 所有风格共用 FORMAT_BLOCK 的双语 + 免责结构约束，保证前端 splitReading 无需改动。 */
@@ -247,10 +249,94 @@ function validate(body) {
 }
 
 /* ============================================================
- * 调 GLM
+ * 流式响应（SSE）
  * ============================================================ */
 
-async function callGlm(key, messages, timeoutMs, model) {
+/* 事件协议（前端按 event 字段分流）：
+ *   {event:'start',  model}          首字之前握手
+ *   {event:'delta',  text}           增量正文
+ *   {event:'done',   reading, model} 收尾（含完整文本，便于前端兜底替换）
+ *   {event:'error',  error}          失败
+ */
+async function respondStream(key, messages, style) {
+  const started = Date.now();
+  const { result, usedModel } = await streamWithFailover(key, messages, started);
+
+  if (!result || !result.ok) {
+    const msg = result && result.code === 'timeout'
+      ? '解读超时了，模型正忙。请稍后再试一次。'
+      : isOverloaded(result)
+        ? '此刻求问的人有点多，解读师正在稍作停顿。请过一会儿再试。'
+        : '解读服务暂时不可用，请稍后再试。';
+    return new Response(sse({ event: 'error', error: msg }), {
+      status: 200,                       // SSE 已建立，错误走事件而非 HTTP 码
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+      },
+    });
+  }
+
+  const upstream = result.stream;
+  const reader = upstream.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+
+  const out = new ReadableStream({
+    start(controller) {
+      controller.enqueue(sse({ event: 'start', model: usedModel }));
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.enqueue(sse({ event: 'done', reading: full.trim(), model: usedModel }));
+          controller.close();
+          return;
+        }
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';         // 末行可能被截断，留到下轮
+        for (const line of lines) {
+          const delta = parseGlmChunk(line.trim());
+          if (delta) {
+            full += delta;
+            controller.enqueue(sse({ event: 'delta', text: delta }));
+          }
+        }
+      } catch (e) {
+        // 上游中途断开：已有内容就地收尾，不报错（用户已看到部分正文）
+        if (full.trim()) {
+          controller.enqueue(sse({ event: 'done', reading: full.trim(), model: usedModel, partial: true }));
+        } else {
+          controller.enqueue(sse({ event: 'error', error: '解读中途断开，请再试一次。' }));
+        }
+        try { controller.close(); } catch (e2) {}
+      }
+    },
+    cancel() {
+      try { reader.cancel(); } catch (e) {}
+      if (result.cancel) result.cancel();
+    },
+  });
+
+  return new Response(out, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',         // 防中间层缓冲，保证首字尽快到达
+      'X-Tarot-Style': style.id,
+    },
+  });
+}
+
+
+
+async function callGlm(key, messages, timeoutMs, model, stream) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), Math.max(1000, timeoutMs));
 
@@ -266,11 +352,25 @@ async function callGlm(key, messages, timeoutMs, model) {
         messages,
         max_tokens: MAX_TOKENS,
         temperature: 0.85,
-        stream: false,
+        stream: !!stream,
         thinking: { type: 'disabled' },   // 关键：关掉推理链，保证正文完整且够快
       }),
       signal: ctrl.signal,
     });
+
+    // 流式：把上游 ReadableStream 直接透出，由调用方边读边转发
+    if (stream) {
+      if (!res.ok || !res.body) {
+        let raw = '';
+        try { raw = await res.text(); } catch (e) {}
+        let data = null;
+        try { data = JSON.parse(raw); } catch (e) {}
+        const code = data && data.error && data.error.code;
+        clearTimeout(timer);
+        return { ok: false, status: res.status, code, raw };
+      }
+      return { ok: true, stream: res.body, cancel: () => { ctrl.abort(); clearTimeout(timer); } };
+    }
 
     const raw = await res.text();
     let data = null;
@@ -334,6 +434,64 @@ async function callWithFailover(key, messages, started) {
 }
 
 /* ============================================================
+ * SSE 工具
+ * ============================================================ */
+
+const enc = new TextEncoder();
+const sse = (obj) => enc.encode('data: ' + JSON.stringify(obj) + '\n\n');
+
+/* 解析 GLM 的 SSE 行，抽出增量文本 */
+function parseGlmChunk(line) {
+  if (!line || line.indexOf('data:') !== 0) return null;
+  const payload = line.slice(5).trim();
+  if (!payload || payload === '[DONE]') return null;
+  try {
+    const j = JSON.parse(payload);
+    const ch = j.choices && j.choices[0];
+    const delta = ch && ch.delta && ch.delta.content;
+    return typeof delta === 'string' ? delta : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* 流式：主模型 → 备用模型依次尝试。首个 chunk 到达前允许切换模型；
+ * 一旦开始吐字就锁定，中途断开也不再换（避免重复内容）。 */
+async function streamWithFailover(key, messages, started) {
+  const models = [GLM_MODEL];
+  if (GLM_FALLBACK_MODEL && GLM_FALLBACK_MODEL !== GLM_MODEL) models.push(GLM_FALLBACK_MODEL);
+
+  let last = null;
+  let usedModel = models[0];
+
+  for (let mi = 0; mi < models.length; mi++) {
+    const model = models[mi];
+    const isLast = mi === models.length - 1;
+    const attempts = isLast ? 2 : 1;
+    const cap = MODEL_CAPS[Math.min(mi, MODEL_CAPS.length - 1)];
+
+    for (let a = 0; a < attempts; a++) {
+      const remain = TOTAL_BUDGET_MS - (Date.now() - started);
+      if (remain < 4000) return { result: last, usedModel };
+
+      const r = await callGlm(key, messages, Math.min(remain, cap), model, true);
+      last = r;
+      usedModel = model;
+      if (r.ok) return { result: r, usedModel };
+
+      // 主模型：只在"过载"时原地重试，超时直接换模型
+      const retryable = isOverloaded(r) || (isLast && r.code === 'timeout');
+      if (!retryable || a === attempts - 1) break;
+
+      const delay = RETRY_DELAYS[a] || 900;
+      if (Date.now() - started + delay > TOTAL_BUDGET_MS - 4000) break;
+      await new Promise((res) => setTimeout(res, delay));
+    }
+  }
+  return { result: last, usedModel };
+}
+
+/* ============================================================
  * 路由
  * ============================================================ */
 
@@ -365,6 +523,13 @@ export async function onRequestPost(context) {
     { role: 'system', content: style.prompt },
     { role: 'user', content: buildUserMessage(question, body.cards) },
   ];
+
+  /* 前端显式要流式（body.stream === true）时走 SSE；否则保持旧的整包 JSON 返回，
+   * 兼容老客户端与调试调用。 */
+  const wantStream = body.stream === true
+    || String(request.headers.get('Accept') || '').indexOf('text/event-stream') >= 0;
+
+  if (wantStream) return await respondStream(key, messages, style);
 
   const started = Date.now();
 
