@@ -1690,13 +1690,23 @@ function init() {
   /* ---- 顶部光球 ---- */
   records = readOrbs();
   renderOrbs(records);
-  /* 云端同步：若 D1 已配置且返回全量，则用云端覆盖本地（跨设备/清缓存后仍能找回） */
+  /* 云端同步：
+   *  - D1 未配置（backend:false）→ cloudPull 返回 null → 保留本地，不动
+   *  - D1 已配置 → 本地 + 云端按 at 合并（云端优先），写回本地；
+   *    仅本地存在、云端没有的记录补推上云（完成绑定前历史的迁移，不丢数据） */
   cloudPull().then((orbs) => {
-    if (orbs && orbs.length) {
-      records = orbs.filter((r) => r && r.cards && r.cards.length === 3).slice(-ORB_MAX);
-      writeOrbs(records);
-      if (state === S.OPENING) renderOrbs(records);
-    }
+    if (!orbs) return;                       // 无云端：纯本地
+    const cloudAts = new Set(orbs.map((r) => String(r && r.at)));
+    const byAt = new Map();
+    records.forEach((r) => { if (r && r.at) byAt.set(String(r.at), r); });
+    orbs.forEach((r) => { if (r && r.cards && r.cards.length === 3) byAt.set(String(r.at), r); }); // 云端覆盖
+    records = Array.from(byAt.values())
+      .sort((a, b) => (a.at || 0) - (b.at || 0))
+      .slice(-ORB_MAX);
+    writeOrbs(records);
+    if (state === S.OPENING) renderOrbs(records);
+    /* 把仅本地有的历史补推上云 */
+    records.forEach((r) => { if (r && r.at && !cloudAts.has(String(r.at))) cloudPush(r); });
   });
 
   /* ---- 事件 ---- */
