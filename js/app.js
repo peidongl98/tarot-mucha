@@ -539,8 +539,60 @@ const ORB_DELETE_DRAG = 60;        // 拖离原位超过此距离（px）即删�
 let orbDel = null;                 // { orb, rec, pid, originX, originY, dx, dy, moved, committed }
 let suppressOrbClick = false;
 
-function showOrbArc() { if (el.orbDeleteArc) el.orbDeleteArc.classList.add('is-on'); }
-function hideOrbArc() { if (el.orbDeleteArc) el.orbDeleteArc.classList.remove('is-on', 'is-danger'); }
+function positionArcAt(orb) {
+  if (!el.orbDeleteArc) return;
+  const target = orb || (el.orbRow && el.orbRow.querySelector('.orb'));
+  if (!target) return;
+  const r = target.getBoundingClientRect();
+  el.orbDeleteArc.style.left = (r.left + r.width / 2) + 'px';
+  el.orbDeleteArc.style.top = (r.top + r.height / 2) + 'px';
+}
+function showOrbArc(orb) {
+  positionArcAt(orb);
+  if (el.orbDeleteArc) el.orbDeleteArc.classList.add('is-on');
+}
+function hideOrbArc() {
+  if (el.orbDeleteArc) el.orbDeleteArc.classList.remove('is-on', 'is-danger', 'is-hint');
+}
+
+/* 呼吸涟漪 & 删除弧提示：仅在首页、未减弱动效、无进行中删除时随机触发 */
+let orbFxTimer = null;
+function orbFxLoop() {
+  if (orbFxTimer) clearTimeout(orbFxTimer);
+  orbFxTimer = setTimeout(() => {
+    if (state === S.OPENING && !orbDel && !REDUCED && el.orbRow && !el.orbRow.hidden) {
+      const orbs = el.orbRow.querySelectorAll('.orb');
+      if (orbs.length) {
+        const pick = orbs[Math.floor(Math.random() * orbs.length)];
+        if (Math.random() < 0.62) spawnOrbRipple(pick);
+        else hintOrbArc(pick);
+      }
+    }
+    orbFxLoop();
+  }, 5000 + Math.random() * 7000);
+}
+function spawnOrbRipple(orb) {
+  if (!orb || REDUCED) return;
+  const r = orb.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = 'orb-ripple';
+  const size = Math.max(r.width, r.height) * 1.5;
+  d.style.width = size + 'px';
+  d.style.height = size + 'px';
+  d.style.left = (r.left + r.width / 2) + 'px';
+  d.style.top = (r.top + r.height / 2) + 'px';
+  document.body.appendChild(d);
+  d.addEventListener('animationend', () => { if (d.parentNode) d.remove(); });
+  setTimeout(() => { if (d.parentNode) d.remove(); }, 2200);   /* 兜底移除 */
+}
+function hintOrbArc(orb) {
+  if (!orb || orbDel || !el.orbDeleteArc) return;
+  positionArcAt(orb);
+  el.orbDeleteArc.classList.add('is-on', 'is-hint');
+  setTimeout(() => {
+    if (el.orbDeleteArc && !orbDel) el.orbDeleteArc.classList.remove('is-on', 'is-hint');
+  }, 950);
+}
 
 function onOrbPointerDown(e) {
   if (state !== S.OPENING || orbDel) return;
@@ -557,7 +609,7 @@ function onOrbPointerDown(e) {
     dx: 0, dy: 0, moved: false, committed: false, _home: null,
   };
   orb.classList.add('is-del-flash');
-  showOrbArc();
+  showOrbArc(orb);
 }
 
 /* 拖出时把光球提到 body 顶层，逃离滚动容器的 overflow 裁剪（否则向下拖会消失） */
@@ -1682,6 +1734,7 @@ function cacheDom() {
   el.opening = document.getElementById('opening');
   el.orbRow = document.getElementById('orbRow');
   el.orbDeleteArc = document.getElementById('orbDeleteArc');
+  orbFxLoop();              /* 首页光球呼吸涟漪 & 删除弧提示（仅 OPENING 态随机触发） */
   el.openingTitle = document.getElementById('openingTitle');
   el.openingQuestion = document.getElementById('openingQuestion');
   el.openingField = document.querySelector('.opening-field');

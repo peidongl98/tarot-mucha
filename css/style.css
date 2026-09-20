@@ -183,16 +183,18 @@ body.input-focused .opening-ring {
 /* ---------- 0. 顶部光球展示（0 个则不显示；少则居中；多则横向滚动） ---------- */
 .opening-orbs {
   position: absolute;
-  top: var(--y-orbs);
+  top: calc(var(--y-orbs) - 30px);   /* 上移补偿内边距，使光球视觉中线回到原落位 */
   left: 0;
   right: 0;
   max-width: 92vw;
   margin: 0 auto;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: safe center;   /* 超出宽度时左对齐可滚动，不裁掉左侧 */
   gap: var(--orb-gap);
-  height: var(--orb-size);
+  height: calc(var(--orb-size) + 64px);   /* 上下各留 32px，避免光晕被裁切（修复显示不全） */
+  padding: 32px 8px;
   opacity: 0;                 /* 由 JS 淡入 */
   overflow-x: auto;
   overflow-y: hidden;
@@ -230,8 +232,24 @@ body.input-focused .opening-ring {
     0 0 32px rgba(201, 169, 97, 0.2);
 }
 
-/* 最旧的那颗：缓慢呼吸式明灭（只有 1 个时保持常亮，不加这个类） */
-.orb.is-aging { animation: orbAging 4.6s ease-in-out infinite; }
+/* 呼吸感：所有光球常驻轻柔明灭（仅首页、未抽牌态；只动 box-shadow，避免与 GSAP transform 冲突） */
+.opening-orbs:not(.is-dim):not(.is-hidden) .orb {
+  animation: orbBreath 5.4s ease-in-out infinite;
+}
+.opening-orbs:not(.is-dim):not(.is-hidden) .orb:nth-child(2) { animation-delay: 1.1s; }
+.opening-orbs:not(.is-dim):not(.is-hidden) .orb:nth-child(3) { animation-delay: 2.3s; }
+
+@keyframes orbBreath {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(201, 169, 97, 0.42), 0 0 26px rgba(201, 169, 97, 0.16);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(201, 169, 97, 0.62), 0 0 44px rgba(201, 169, 97, 0.30);
+  }
+}
+
+/* 最旧的那颗：在呼吸基础上更明显的起伏（只有 1 个时保持常亮，不加这个类） */
+.opening-orbs:not(.is-dim):not(.is-hidden) .orb.is-aging { animation: orbAging 4.6s ease-in-out infinite; }
 
 @keyframes orbAging {
   0%, 100% {
@@ -239,8 +257,8 @@ body.input-focused .opening-ring {
     box-shadow: 0 0 14px rgba(201, 169, 97, 0.5), 0 0 32px rgba(201, 169, 97, 0.2);
   }
   50% {
-    opacity: 0.24;
-    box-shadow: 0 0 5px rgba(201, 169, 97, 0.18), 0 0 14px rgba(201, 169, 97, 0.06);
+    opacity: 0.7;
+    box-shadow: 0 0 8px rgba(201, 169, 97, 0.3), 0 0 20px rgba(201, 169, 97, 0.12);
   }
 }
 
@@ -260,20 +278,24 @@ body.input-focused .opening-ring {
   50%      { transform: translateY(-4px); }
 }
 
-/* ---------- 光球长按删除：半圆弧流光 + 拖拽态 ---------- */
+/* ---------- 光球长按删除：完整圆形，只露顶部半圆（穹顶罩在光球上方） ---------- */
 .orb-delete-arc {
-  position: absolute;
+  position: fixed;            /* 用视口坐标对齐光球中心，不受父级定位影响 */
   left: 50%;
   top: var(--y-orbs);
   transform: translate(-50%, -50%);
-  width: 240px;
-  height: 140px;
+  width: calc(var(--orb-size) * 3);
+  height: calc(var(--orb-size) * 3);
+  margin: 0;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.28s ease;
-  z-index: 3;
+  z-index: 4;
+  clip-path: inset(0 0 50% 0);   /* 只保留上半圆：圆形、顶部露一半 */
+  overflow: visible;
 }
 .orb-delete-arc.is-on { opacity: 1; }
+.orb-delete-arc.is-hint { opacity: 0.8; }
 .orb-delete-arc svg { width: 100%; height: 100%; overflow: visible; display: block; }
 .arc-line {
   fill: none;
@@ -295,6 +317,30 @@ body.input-focused .opening-ring {
   filter: drop-shadow(0 0 8px rgba(255, 120, 120, 0.8));
 }
 @keyframes arcFlow { to { stroke-dashoffset: -48; } }
+
+/* 呼吸涟漪：随机从某颗光球泛起一圈扩散光环 */
+.orb-ripple {
+  position: fixed;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--gold-dim);
+  box-shadow: 0 0 10px rgba(201, 169, 97, 0.4);
+  transform: translate(-50%, -50%) scale(0.5);
+  opacity: 0;
+  z-index: 2;
+  animation: orbRipple 1.8s ease-out forwards;
+}
+@keyframes orbRipple {
+  0%   { opacity: 0.55; transform: translate(-50%, -50%) scale(0.5); }
+  70%  { opacity: 0.22; }
+  100% { opacity: 0;    transform: translate(-50%, -50%) scale(2.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .opening-orbs .orb,
+  .opening-orbs .orb.is-aging { animation: none !important; }
+  .orb-ripple { display: none !important; }
+}
 
 /* 激活删除：球闪烁 */
 .orb.is-del-flash {
