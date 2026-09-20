@@ -93,6 +93,14 @@
     <span class="ring-wave"></span>
     <span class="ring-wave"></span>
   </button>
+  <!-- 环下方的多条弯曲流光线：解读等待期交错流动，缓解等待。
+       放在按钮外（button 的 overflow 不可控），靠 .ai-ring.is-thinking 的状态类驱动。 -->
+  <svg class="ring-streams" viewBox="0 0 240 120" preserveAspectRatio="none" aria-hidden="true">
+    <path class="rs rs-a" d="M2,26 C52,4 92,52 132,30 C170,9 206,40 238,22" />
+    <path class="rs rs-b" d="M2,52 C46,32 88,76 130,52 C168,30 208,62 238,44" />
+    <path class="rs rs-c" d="M2,78 C50,58 90,102 134,78 C172,57 210,88 238,70" />
+    <path class="rs rs-d" d="M2,100 C44,84 86,112 132,96 C170,82 208,104 238,92" />
+  </svg>
   <div class="ai-text" id="aiText" aria-live="polite"></div>
   <p class="seal-label" aria-hidden="true">Seal</p>
   <button id="returnOrb" class="return-orb" type="button" aria-label="Hold to seal and return">

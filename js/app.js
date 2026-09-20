@@ -1111,11 +1111,11 @@ function clearAiText() {
   el.aiText.classList.remove('is-on');
 }
 
-/* 免责声明文案：模型输出、前端兜底、流式剥离三处共用同一份常量，
+/* 免责声明文案：模型输出、前端兜底、块尾剥离三处共用同一份常量，
  * 改文案时只改这里，不会漏改。 */
 const NOTE_EN = 'For entertainment reference only.';
 const NOTE_CN = '以上解读仅供娱乐参考';
-const STREAM_NOTES = [NOTE_EN, NOTE_CN];
+const READING_NOTES = [NOTE_EN, NOTE_CN];
 
 /* 解读分语种：先按空行分段（段内偶发的软换行合并回一段），
  * 再按语言归类 —— 含 ≥2 个 CJK 字符的段归中文，其余归英文。
@@ -1132,7 +1132,7 @@ function splitReading(text) {
        * 否则先匹配到中文那条、英文那条就残留在正文里。 */
       const notes = [];
       for (;;) {
-        const hit = STREAM_NOTES.find((n) => joined.endsWith(n));
+        const hit = READING_NOTES.find((n) => joined.endsWith(n));
         if (!hit) break;
         notes.unshift(hit);
         joined = joined.slice(0, joined.length - hit.length).trim();
@@ -1181,33 +1181,9 @@ function playAiRipple() {
   window.setTimeout(() => rip.remove(), 2800);
 }
 
-function showAiText(text, streaming) {
-  /* 流式增量：中英分流到两个容器，用与终稿完全相同的字体规则渲染，
-   * 保证「流式看到的字形」与「终稿字形」是同一套（用户反馈的不统一问题）。
-   * 不做逐帧重排动画（会抖动），改为每个新字符单独淡入 → 视觉上是"浮现"而非"打字"。 */
-  if (streaming) {
-    el.aiText.classList.add('streaming');
-    if (!aiStreamEls) {
-      el.aiText.textContent = '';
-      const gEn = elNew('div', 'ai-group ai-group-en');
-      const gCn = elNew('div', 'ai-group ai-group-cn');
-      const pEn = elNew('p', 'ai-en ai-stream-en');
-      const pCn = elNew('p', 'ai-stream-cn');
-      gEn.appendChild(pEn);
-      gCn.appendChild(pCn);
-      el.aiText.appendChild(gEn);
-      el.aiText.appendChild(gCn);
-      aiStreamEls = { pEn, pCn, en: '', cn: '' };
-      el.aiText.classList.add('is-on');
-    }
-    /* 把新增文本按字符类型追加到对应容器（英文段 / 中文段），并给新字符包一层淡入。
-     * 已有字符不动 → 不触发整段重排，滚动位置稳定。 */
-    appendStream(aiStreamEls, text);
-    return;
-  }
-  aiStreamEls = null;
-  el.aiText.classList.remove('streaming');
-
+function showAiText(text) {
+  /* 整篇浮现（不再有流式增量）：完整解读一次到位。
+   * 入场做「浮出水面」——先整体不可见 + 轻微缩放/模糊，再整篇淡出成形。 */
   const r = splitReading(text);
   const en = r.en;
   const cn = r.cn;
@@ -1221,96 +1197,55 @@ function showAiText(text, streaming) {
   gCn.appendChild(elNew('p', 'ai-note', r.cnNote || NOTE_CN));
   if (gEn.childElementCount) el.aiText.appendChild(gEn);
   if (gCn.childElementCount) el.aiText.appendChild(gCn);
-  el.aiText.classList.add('is-on');
   el.aiText.scrollTop = 0;
 
   const gsap = window.gsap;
-  const ps = Array.prototype.slice.call(el.aiText.querySelectorAll('p'));
 
-  if (REDUCED || !gsap || !ps.length) {
+  if (REDUCED || !gsap) {
+    el.aiText.classList.add('is-on');
     setAiRingVisible(false);
     return;
   }
+
+  /* 整篇浮现（"像浮出水面"）：文字入场前完全隐去，再整篇一起出水成形 ——
+   * 不做逐段 stagger（那会变成挤牙膏），而是「整体」一次到位。
+   *
+   * 分两层动画：
+   *   ① 整体上浮 + 清模糊 + 淡入（浮出水面的主体动作）
+   *   ② 竖直方向的高频低幅振荡（幅度衰减到 0）= "水面抖动"，
+   *      模拟破水瞬间那一下晃动。
+   * 抖动只动 .ai-text 的 transform，不碰内部文字排版，故不会触发重排。 */
+  gsap.set(el.aiText, { opacity: 0, y: 26, filter: 'blur(9px)' });
+  el.aiText.classList.add('is-on');           // 打开滚动区显隐与定位（此时仍全透明）
+
+  gsap.to(el.aiText, {
+    opacity: 1, y: 0, filter: 'blur(0px)',
+    duration: 1.25, ease: 'power3.out',
+    onComplete: () => { gsap.set(el.aiText, { clearProps: 'filter' }); },
+  });
+
+  /* 水面抖动：与上浮并行，0.09s 一跳、幅度 10→0 递减 */
+  gsap.to(el.aiText, {
+    keyframes: [
+      { y: 10, duration: 0.09 }, { y: -7, duration: 0.09 },
+      { y: 5, duration: 0.09 }, { y: -3, duration: 0.09 },
+      { y: 2, duration: 0.09 }, { y: 0, duration: 0.12 },
+    ],
+    duration: 0.57, delay: 0.06, ease: 'none',
+    onComplete: () => { gsap.set(el.aiText, { clearProps: 'transform' }); },
+  });
+
+  /* 英文组 / 中文组各自从模糊里成形（几乎同时，只留极小的先后） */
+  Array.prototype.slice.call(el.aiText.children).forEach((g, i) => {
+    gsap.fromTo(g,
+      { opacity: 0, filter: 'blur(7px)' },
+      { opacity: 1, filter: 'blur(0px)', duration: 1.05, delay: 0.1 + i * 0.08, ease: 'power2.out' });
+  });
+
   playAiRipple();
-  const stagger = 0.3;
-  gsap.fromTo(ps,
-    { opacity: 0, y: 12 },
-    { opacity: 1, y: 0, duration: 0.9, stagger, ease: 'power2.out', delay: 0.2 });
-  const totalMs = (0.2 + stagger * (ps.length - 1) + 0.9 + 0.4) * 1000;
   window.setTimeout(() => {
     if (!aiBusy) setAiRingVisible(false);   // 期间若重新发起解读，不抢状态
-  }, totalMs);
-}
-
-/* 流式字符分流状态：{ pEn, pCn, en, cn } */
-let aiStreamEls = null;
-
-/* 逐字符浮现：把新字符包进 <i> 并加 CSS 动画，
- * 视觉上是"从雾里浮出来"而不是"被敲出来"。
- * 每帧最多渲染 FADE_MAX 个新字符，避免一次涌入时整屏闪。 */
-const FADE_MAX = 14;
-
-/* 流式期间要摘掉的免责句（STREAM_NOTES 定义见上方常量区）。
- * 模型把英文免责句写在英文段末尾、中文免责句写在中文段末尾；
- * 但流式切分是按「首个中文字符」判中英的，英文免责句属于纯英文 → 会被算进英文正文，
- * 视觉上英文组就多出一条（终稿里它是单独一行的 .ai-note）。
- * 因此在流式阶段先把免责句从正文里剥离，不给它们建流式节点。 */
-function stripStreamNotes(text) {
-  let s = String(text);
-  for (let i = 0; i < STREAM_NOTES.length; i++) {
-    const n = STREAM_NOTES[i];
-    let idx = s.indexOf(n);
-    while (idx >= 0) {                       // 反复剥离（模型偶发重复输出）
-      s = s.slice(0, idx) + s.slice(idx + n.length);
-      idx = s.indexOf(n);
-    }
-  }
-  return s;
-}
-
-function appendStream(els, fullText) {
-  /* 首次以英文开头、之后遇中文切到中文段；用"首个中文字符"作为分界 */
-  const clean = stripStreamNotes(fullText);
-  const splitAt = (() => {
-    const m = clean.search(/[\u4e00-\u9fff]/);
-    return m < 0 ? clean.length : m;
-  })();
-  const enPart = clean.slice(0, splitAt);
-  const cnPart = splitAt < clean.length ? clean.slice(splitAt) : '';
-
-  /* 免责句被摘掉后句子可能变短（比如重跑时 text 变短），
-   * 此时只做「新增追加」，不回退已渲染内容，避免闪断。 */
-  if (enPart.length > els.en.length) {
-    const add = enPart.slice(els.en.length);
-    els.en = enPart;
-    pushFaded(els.pEn, add);
-  }
-  if (cnPart.length > els.cn.length) {
-    const add = cnPart.slice(els.cn.length);
-    els.cn = cnPart;
-    pushFaded(els.pCn, add);
-  }
-}
-
-/* 把一段新增文本逐字符包 <i> 追加（保留换行 → 用 <br>） */
-function pushFaded(node, chunk) {
-  const frag = document.createDocumentFragment();
-  for (let i = 0; i < chunk.length; i++) {
-    const ch = chunk[i];
-    if (ch === '\n') { frag.appendChild(document.createElement('br')); continue; }
-    const s = document.createElement('i');
-    s.className = 'ai-fade';
-    s.textContent = ch;
-    frag.appendChild(s);
-  }
-  node.appendChild(frag);
-  /* 只保留最近若干字符带入场动画类，避免 DOM 上堆积几十万个动画节点 */
-  const kids = node.children;
-  const keep = 40;
-  for (let i = Math.max(0, kids.length - keep - 8); i < kids.length - keep; i++) {
-    const n = kids[i];
-    if (n.classList && n.classList.contains('ai-fade')) n.classList.remove('ai-fade');
-  }
+  }, 2200);
 }
 
 function showAiError(msg) {
@@ -1325,13 +1260,16 @@ async function askAi() {
   if (aiBusy || !lastReading || lastAiText) return;
   aiBusy = true;
   setAiRingVisible(true);
-  setAiThinking(true);
+  setAiThinking(true);              // 光圈进入"解读中"：黄环 + 弯曲线交错流动承担整个等待期
+
+  /* 等待期：文字区完全空着（只看到光球特效 + 一行极淡的 Reading the cards…）。
+   * 不再流式吐字 —— 用户明确要求「与其看半截字，不如多等一下」。
+   * 完整解读回来后才整篇浮现（showAiText 的 non-streaming 分支）。 */
   el.aiText.textContent = '';
+  el.aiText.appendChild(elNew('p', 'ai-note ai-waiting', 'Reading the cards…'));
   el.aiText.classList.add('is-on');
-  el.aiText.appendChild(elNew('p', 'ai-note', 'Reading the cards…'));
 
   const payload = {
-    stream: true,                                     // 走 SSE：首字 1–2s 内可见
     question: lastQuestion,
     cards: lastReading.map((c) => {
       const meta = TAROT_BY_ID[c.id];
@@ -1357,68 +1295,19 @@ async function askAi() {
   try {
     const res = await fetch('/api/tarot', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
 
-    const ctype = res.headers.get('Content-Type') || '';
-
-    /* 老路：整包 JSON（Function 未升级 / 不支持流式时的兜底） */
-    if (ctype.indexOf('text/event-stream') < 0 || !res.body) {
-      let data = null;
-      try { data = await res.json(); } catch (e) { data = null; }
-      if (!res.ok || !data || !data.success || !data.reading) {
-        showAiError((data && data.error) || 'The reading is unavailable right now. Please try again later.');
-        return;
-      }
-      lastAiText = data.reading;
-      showAiText(data.reading);
-      persistReading(fromHistory);
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok || !data || !data.success || !data.reading) {
+      showAiError((data && data.error) || 'The reading is unavailable right now. Please try again later.');
       return;
     }
-
-    /* 流式：边收边渲染。streamStart 标记是否已把"思考中"换成正文。 */
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let acc = '';
-    let started2 = false;
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (const line of lines) {
-        const t = line.trim();
-        if (t.indexOf('data:') !== 0) continue;
-        let ev = null;
-        try { ev = JSON.parse(t.slice(5).trim()); } catch (e) { continue; }
-        if (!ev) continue;
-
-        if (ev.event === 'error') {
-          if (!started2) { showAiError(ev.error || 'The reading is unavailable right now. Please try again later.'); return; }
-          break;
-        }
-        if (ev.event === 'delta' && ev.text) {
-          acc += ev.text;
-          started2 = true;
-          setAiThinking(false);              // 首字到达即撤掉"思考中"动画
-          showAiText(acc, true);             // 增量模式：不重排、不滚到底，避免跳动
-        } else if (ev.event === 'done') {
-          if (ev.reading) acc = ev.reading;  // 以完整结果为准，兜底修正
-        }
-      }
-    }
-
-    if (!acc.trim()) {
-      showAiError('The reading came back empty. Please try again.');
-      return;
-    }
-    lastAiText = acc.trim();
-    showAiText(lastAiText);                  // 终稿：走完整排版（分段 + 双语归组）
+    lastAiText = data.reading;
+    showAiText(lastAiText);                  // 整篇浮现（含水面抖动）
     persistReading(fromHistory);
   } catch (e) {
     if (e && e.name === 'AbortError') showAiError('The reading timed out. The model is busy — please try again shortly.');
@@ -1954,14 +1843,31 @@ function handleKeyboard() {
   try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
 }
 
-/* 键盘缩水（宽同高缩）不重算布局；真实 resize（旋转/分屏）才更新锁定 */
+/* 视口变化分三类，处理方式完全不同：
+ *
+ * 1) 键盘弹出：宽不变、高骤缩（> KB_MIN）。主布局**不许动**（--vph 保持锁定），
+ *    只上浮输入区 —— 否则画布与牌会跟着挤压。
+ * 2) 地址栏伸 / 缩：宽不变、高小幅变化（< KB_MIN）。这是**真 resize**，
+ *    必须重锁 --vph，否则文档高固定为「打开页面时的最大高」，
+ *    只要真机视口掉到锁定值以下（iOS 地址栏展开 / 底部手势条遮挡），
+ *    文档就比视口高 → 右侧竖直滚动条闪现（用户报的"页面大小在抽搐"）。
+ * 3) 旋转 / 分屏：宽变了 → 重锁 + 重算布局 + 3D 重排。
+ *
+ * 判定「是否键盘」不能只看高度差：键盘弹出时焦点必在输入框上，
+ * 地址栏伸缩时通常没有输入焦点。用 focus 状态做二次确认，避免把
+ * 小幅地址栏变化误判成键盘（那会导致 --vph 永不更新 → 滚动条抖动）。 */
 function onViewportChange() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  if (h < vpLock.h - KB_MIN && Math.abs(w - vpLock.w) <= 2) {
+  const widthSame = Math.abs(w - vpLock.w) <= 2;
+  /* 键盘：高度骤缩 + 输入框处于焦点态（keyboard 弹起必然伴随 focus） */
+  const likelyKeyboard = widthSame && h < vpLock.h - KB_MIN && (inputFocused || kbOn);
+
+  if (likelyKeyboard) {
     handleKeyboard();
     return;
   }
+
   lockViewport();
   handleKeyboard();
   setupQuestionBox();
