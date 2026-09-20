@@ -542,10 +542,11 @@ function focusOnDesktop() {
   }
 }
 
-/* 开场光圈：空态暗且静止，有字后变亮 + 涟漪扩散 */
+/* 开场光圈：空态暗且静止，有字后变亮 + 涟漪扩散；输入框流光同步 */
 function syncRing() {
   if (!el.ringBtn) return;
   const has = (el.question.value || '').trim().length > 0;
+  if (el.openingField) el.openingField.classList.toggle('has-text', has);
   if (has === ringActive) return;
   ringActive = has;
   el.ringBtn.classList.toggle('is-active', has);

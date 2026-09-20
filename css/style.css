@@ -324,6 +324,61 @@ body.kb-on .opening-ring {
 
 .opening-input:focus { outline: none; box-shadow: none; }
 
+/* ---------- 输入框下方流光：香槟金细线，光斑从左向右循环流动 ----------
+ * 空态：缓慢流动、暗淡；有字（.has-text）：流动加快、变亮。
+ * 流光是底层（z-index 0），输入文字在其上层；只动 transform/opacity。 */
+.field-stream {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: -16px;
+  height: 2px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.field-stream::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(201, 169, 97, 0.14) 28%,
+    rgba(201, 169, 97, 0.14) 72%,
+    transparent);
+}
+
+.field-stream i {
+  position: absolute;
+  top: -0.5px;
+  left: 0;
+  width: 34%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(233, 214, 168, 0.9) 46%,
+    rgba(255, 250, 238, 0.95) 50%,
+    rgba(233, 214, 168, 0.9) 54%,
+    transparent);
+  box-shadow: 0 0 9px rgba(201, 169, 97, 0.5);
+  opacity: 0.4;
+  transform: translateX(-130%);
+  animation: streamFlow 5.6s linear infinite;
+}
+
+.opening-field.has-text .field-stream i {
+  opacity: 1;
+  animation-duration: 2.3s;
+}
+
+@keyframes streamFlow {
+  0%   { transform: translateX(-130%); opacity: 0; }
+  14%  { opacity: 0.85; }
+  86%  { opacity: 0.5; }
+  100% { transform: translateX(430%); opacity: 0; }
+}
+
 /* ---------- 6. 泛涟漪光圈 ---------- */
 .opening-ring {
   position: absolute;
@@ -992,6 +1047,7 @@ body.no-3d .card-hit img { visibility: visible; }
   html { scroll-behavior: auto; }
   .orb.is-aging { animation: none; }
   .star-hint i { animation: none; opacity: 0.5; }
+  .field-stream i { animation: none; opacity: 0.35; transform: translateX(40%); }
   .ai-ring.is-thinking { animation: none; }
   .return-orb::after { animation: none; }
   .ai-ripple.is-on { animation: none; }
