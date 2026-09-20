@@ -1106,7 +1106,6 @@ function showMeaning(i) {
   el.cardRead.textContent = '';
   if (gEn.childElementCount) el.cardRead.appendChild(gEn);
   if (gCn.childElementCount) el.cardRead.appendChild(gCn);
-  el.cardRead.scrollTop = 0;
   el.cardRead.classList.add('is-on');
 }
 
