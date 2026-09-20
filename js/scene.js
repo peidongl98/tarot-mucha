@@ -1420,7 +1420,7 @@ export function createTarotScene(container) {
       return {
         c, on: true,
         th: th0, r: Math.max(1, Math.hypot(dx, dy)),
-        x: 0, lean: CONFIG.fanLean,
+        lean: CONFIG.fanLean, spin: 0,
         thA, r0: Math.max(1, Math.hypot(dx, dy)),
       };
     });
@@ -1430,7 +1430,8 @@ export function createTarotScene(container) {
         if (!o.on) return;
         const wx = screenToWorld(cx + Math.sin(o.th) * o.r, st.cy + Math.cos(o.th) * o.r, zPlane, wheelVec);
         o.c.root.position.set(wx.x, wx.y, zPlane);
-        o.c.root.rotation.set(o.lean, 0, -o.th);         // 长轴沿切线 → 漩涡观感
+        /* 长轴沿切线（-o.th）叠加自身自旋（spin）→ 螺旋退场观感 */
+        o.c.root.rotation.set(o.lean, 0, -o.th + o.spin);
       });
     };
 
@@ -1453,21 +1454,25 @@ export function createTarotScene(container) {
       }, 0);
     });
 
-    /* ② 吸入：半径归零、旋转加速、缩小淡出（后半段消失） */
+    /* ② 螺旋吸入：半径收缩 → 牌一边公转加速、一边绕自身 Z 轴自旋，旋转缩小退场。
+     * 关键是"转着缩没"，而不是单纯缩没——牌面角度持续变化制造螺旋感。 */
     per.forEach((o, i) => {
       if (!o.on) return;
-      tl.to(o, { th: o.thA + Math.PI * 2 * 1.15, duration: durB, ease: 'power3.in' }, durA);
+      const spinDir = (i % 2 === 0) ? 1 : -1;             // 相邻牌反向自旋，漩涡更碎更亮
+      tl.to(o, { th: o.thA + Math.PI * 2 * 1.35 * spinDir, duration: durB, ease: 'power3.in' }, durA);
       tl.to(o, { r: 0, duration: durB, ease: 'power3.in' }, durA);
+      /* 自旋：绕卡片法线（Z）转 1.25 圈，与公转叠加 = 螺旋退场 */
+      tl.to(o, { spin: Math.PI * 2 * 1.25 * spinDir, duration: durB, ease: 'power2.in', onUpdate: place }, durA);
       tl.to(o.c.root.scale, {
-        x: 0.02, y: 0.02, z: 0.02, duration: durB * 0.92, ease: 'power2.in',
+        x: 0.001, y: 0.001, z: 0.001, duration: durB, ease: 'power2.in',
       }, durA);
       tl.to({ v: 1 }, {
-        v: 0, duration: durB * 0.5, ease: 'power2.in', delay: durB * 0.38,
+        v: 0, duration: durB * 0.46, ease: 'power2.in', delay: durB * 0.5,
         onUpdate: function () { o.c.setOpacity(this.targets()[0].v); },
       }, durA);
     });
 
-    return { tl, origin, appearAt: durA + durB * 0.55, cycle: durA + durB };
+    return { tl, origin, appearAt: durA + durB, cycle: durA + durB };
   }
 
   /* 抽牌：扇形漩涡退场（聚圆→吸入→消失），三张牌从消失点飞向滚筒（背面朝上）。
@@ -1518,7 +1523,7 @@ export function createTarotScene(container) {
     let vortex = null;
     if (vortexOk) vortex = fanVortexExit(speed);
 
-    /* 2) 三张牌：起点 = 漩涡消失点（或牌堆位 / 扇面位），终点 = 滚筒槽位 */
+    /* 2) 三张牌：起点 = 漩涡消失点（极小 + 带旋转）→ 旋转放大飞出，终点 = 滚筒槽位 */
     const turn = o.quick ? 0.5 : CONFIG.dealSpin * 0.5;
     const startPx = Math.max(26, size().h * 0.075);      // 飞出起始牌高（由小变大）
 
@@ -1530,12 +1535,13 @@ export function createTarotScene(container) {
       if (o.fromDeck) {
         s0 = { x: deckSlot.x + (i - 1) * pixelsToWorld(30, 0), y: deckSlot.y, z: deckSlot.z, scale: deckScale, rotZ: (i - 1) * 0.14 };
       } else if (vortex) {
+        /* 起点与漩涡终点严格对齐：极小尺寸 + 各自自旋角，飞出时"由旋转到正" */
         s0 = {
-          x: vortex.origin.x + (i - 1) * pixelsToWorld(12, 0),
+          x: vortex.origin.x + (i - 1) * pixelsToWorld(10, 0),
           y: vortex.origin.y,
           z: vortex.origin.z,
-          scale: pixelsToWorld(startPx, 0) / CARD_H,
-          rotZ: (i - 1) * 0.55,
+          scale: 0.001,                                   // 从消失点"无"中长出
+          rotZ: (i % 2 === 0 ? 1 : -1) * Math.PI * 1.15,  // 起始自旋 1.15 圈
         };
       } else {
         const n = fanSlots.length || 1;
@@ -1589,22 +1595,29 @@ export function createTarotScene(container) {
     const tl = vortex ? vortex.tl : gsap.timeline();
     const flyAt = vortex ? vortex.appearAt : 0.24 * speed;
 
-    /* 逐张淡入到各自的滚筒不透明度（居中 1，侧牌 wheelDim），落位后无缝交给滚筒摆位 */
+    /* 逐张快速淡入到目标不透明度（初期极短，因为可见度主要由 scale 承担） */
     current.forEach((c, i) => {
       const tOp = CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, targets[i].cos);
       tl.to({ v: 0 }, {
-        v: tOp, duration: 0.5 * speed, ease: 'power2.out',
+        v: tOp, duration: 0.28 * speed, ease: 'power1.out',
         onUpdate: function () { c.setOpacity(this.targets()[0].v); },
-      }, flyAt + 0.05 * speed * i);
+      }, flyAt + 0.03 * speed * i);
     });
 
     current.forEach((c, i) => {
       const s = targets[i];
-      const at = flyAt + 0.14 * speed * i;
-      /* 由小变大、边飞边散开（位置 back.out 轻微过冲 = 落位弹性） */
+      const at = flyAt + 0.1 * speed * i;
+      /* 旋转放大飞出：位置由消失点飞到滚筒槽（back 轻微过冲 = 落位弹性），
+       * 旋转从起始自旋回到正视（power3 由快转慢），scale 由"无"放大到目标。 */
       tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25 * speed, ease: 'back.out(1.15)' }, at);
-      tl.to(c.root.rotation, { x: s.rotX, y: s.rotY || 0, z: 0, duration: 1.2 * speed, ease: 'power3.out' }, at);
-      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.15 * speed, ease: 'back.out(1.3)' }, at);
+      tl.to(c.root.rotation, {
+        x: s.rotX, y: s.rotY || 0, z: 0,
+        duration: 1.2 * speed, ease: 'power3.out',
+      }, at);
+      tl.to(c.root.scale, {
+        x: s.scale, y: s.scale, z: s.scale,
+        duration: 1.15 * speed, ease: 'back.out(1.3)',
+      }, at);
     });
 
     return new Promise((res) => {
