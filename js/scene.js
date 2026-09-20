@@ -399,6 +399,7 @@ function buildCard(backTex, faceTex, anisotropy) {
     roughness: 0.6,
     metalness: 0.08,
     transparent: true, opacity: 1,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,   // 贴面偏离牌体，消除深度闪动
   });
   materials.push(faceMat);
   const face = new THREE.Mesh(new THREE.PlaneGeometry(CARD_W, CARD_H), faceMat);
@@ -415,6 +416,7 @@ function buildCard(backTex, faceTex, anisotropy) {
     roughness: 0.52,
     metalness: 0.2,
     transparent: true, opacity: 1,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,   // 贴面偏离牌体，消除深度闪动
   });
   materials.push(backMat);
   const back = new THREE.Mesh(new THREE.PlaneGeometry(CARD_W, CARD_H), backMat);
@@ -816,11 +818,14 @@ export function createTarotScene(container) {
 
     const pivot = screenToWorld(w / 2, pivotYpx, 0, new THREE.Vector3());
 
-    fanSlots = raw.map((r) => ({
+    // z：扇形弧度带来的前后层次 + 按索引固定递进，保证相邻牌间距恒 > 牌体厚度（否则中间几张 z 近似 →
+    // 牌体互相穿插 → 深度闪动）。t≈0 的中间牌原本都挤在 z=0 同一平面。
+    const fanGap = CONFIG.cardDepth * 1.8;
+    fanSlots = raw.map((r, i) => ({
       t: r.t,
       x: pivot.x + pixelsToWorld(r.dx, 0),
       y: pivot.y - pixelsToWorld(r.dy, 0),        // 屏幕向下 = 世界 -y
-      z: -Math.abs(r.t) * 0.30,
+      z: -Math.abs(r.t) * 0.30 - i * fanGap,
       rotZ: r.a,                                  // 长轴沿半径 → 牌自顶部圆心向外辐射
     }));
   }
@@ -1083,13 +1088,15 @@ export function createTarotScene(container) {
     tiltReset();                 // 展开后不再跟随指针
     openingLayout();
 
-    // 先把牌叠回牌堆位置（像一叠牌）
+    // 先把牌叠回牌堆位置（像一叠牌）。
+    // 间隔必须 > 牌体厚度（cardDepth 0.03），否则相邻牌体穿插 → z-fighting 闪动。
     const fanSlotsCount = fanSlots.length;
+    const stackGap = CONFIG.cardDepth * 1.8;
     openingCards.forEach((c, i) => {
       c.root.visible = i < fanSlotsCount;
       c.setOpacity(1);
       c.root.scale.setScalar(deckScale);
-      c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z - i * 0.014);
+      c.root.position.set(deckSlot.x, deckSlot.y, deckSlot.z - i * stackGap);
       c.root.rotation.set(0, 0, (i - (CONFIG.fanCount - 1) / 2) * 0.012);
     });
 
@@ -1113,7 +1120,7 @@ export function createTarotScene(container) {
     openingSyncVisibility();
     openingCards.forEach((c, i) => {
       const s = fanSlots[i];
-      if (!s) return;
+      if (!s) { c.setOpacity(0); c.root.visible = false; return; }   // 无槽位的多余额外牌彻底隐藏
       const delay = Math.abs(s.t) * CONFIG.fanStagger;   // 中间先动、外侧随后 → 像扇面绽开
       tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.6, ease: 'power3.out' }, delay);
       tl.to(c.root.rotation, { x: CONFIG.fanLean, z: s.rotZ, duration: 1.6, ease: 'power3.out' }, delay);
