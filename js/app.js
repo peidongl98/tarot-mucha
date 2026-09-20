@@ -33,7 +33,7 @@ const ORB_KEY = 'tarot_orbs';
 /* 更早版本用 localStorage 存抽牌历史列表，那套 UI 已移除；顺手清掉遗留键 */
 const LEGACY_KEY = 'tarot_history';
 
-const HOLD_MS = 1100;          // 长按返回光球的时长
+const HOLD_MS = 1500;          // 长按返回光球（Seal）的时长：进度与光球变亮同步
 const DRAG_SLOP = 12;          // 按下到抬起的位移阈值（px）：超过就算拖动，不算点击
 
 /* 滚筒：角度由前端统一持有（3D 与降级模式共用同一套交互）。
@@ -973,6 +973,8 @@ function startHold(e) {
   holdTimer = window.setTimeout(() => {
     holdTimer = null;
     el.returnOrb.classList.remove('is-holding');
+    /* 触觉反馈：长按完成瞬间轻微震动（不支持则静默跳过） */
+    try { if (navigator.vibrate) navigator.vibrate(18); } catch (err) { /* 忽略 */ }
     finishAndReturn();
   }, HOLD_MS);
 }
@@ -1510,6 +1512,7 @@ function init() {
     el.returnOrb.addEventListener('pointerdown', startHold);
     el.returnOrb.addEventListener('pointerup', cancelHold);
     el.returnOrb.addEventListener('pointercancel', cancelHold);
+    el.returnOrb.addEventListener('contextmenu', (e) => e.preventDefault());   // 长按不弹菜单
   }
   if (el.orbRow) {
     const pick = (target) => {
