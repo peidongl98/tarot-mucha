@@ -759,8 +759,15 @@ function enterReading() {
   if (scene && scene.ok) scene.setView('top');
   el.readingView.classList.add('is-on');
   el.returnOrb.classList.add('is-on');
-  if (lastAiText) showAiText(lastAiText, true);      // 历史回看 / 已解读过：直接显示，光圈隐去
-  else { clearAiText(); setAiRingVisible(true); }     // 未解读：光圈亮起等待点击
+  if (lastAiText) {
+    showAiText(lastAiText, true);      // 缓存命中（重复进出 / 历史回看）：直接显示，不重复调用
+  } else {
+    clearAiText();
+    setAiRingVisible(true);
+    playAiRipple();                    // 自动播放一次涟漪，提示解读开始
+    /* 全自动：视图落定后自动发起解读，无需任何操作 */
+    window.setTimeout(() => { if (state === S.READING && !lastAiText) askAi(); }, 900);
+  }
   updateHits();
 }
 
@@ -841,6 +848,14 @@ function splitReading(text) {
 
 /* 解读文字（中英双语）：英文组在上、中文组在下，从光圈位置浮出 +
  * 一次涟漪扩散 + 段落逐段浮现；浮现完成后光圈淡出隐去（问题 2）。 */
+function playAiRipple() {
+  const rip = elNew('span', 'ai-ripple');
+  el.readingView.appendChild(rip);
+  void rip.offsetWidth;
+  rip.classList.add('is-on');
+  window.setTimeout(() => rip.remove(), 2800);
+}
+
 function showAiText(text, instant) {
   const r = splitReading(text);
   const en = r.en;
@@ -865,11 +880,7 @@ function showAiText(text, instant) {
     setAiRingVisible(false);
     return;
   }
-  const rip = elNew('span', 'ai-ripple');
-  el.readingView.appendChild(rip);
-  void rip.offsetWidth;
-  rip.classList.add('is-on');
-  window.setTimeout(() => rip.remove(), 2800);
+  playAiRipple();
   const stagger = 0.3;
   gsap.fromTo(ps,
     { opacity: 0, y: 12 },
@@ -888,7 +899,8 @@ function showAiError(msg) {
 }
 
 async function askAi() {
-  if (aiBusy || !lastReading) return;
+  /* 缓存：同一次抽牌已有解读（或正在生成）就不再调用 */
+  if (aiBusy || !lastReading || lastAiText) return;
   aiBusy = true;
   setAiRingVisible(true);
   setAiThinking(true);
