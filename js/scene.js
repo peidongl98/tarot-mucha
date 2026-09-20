@@ -305,9 +305,6 @@ function makeMistGeometry(count) {
  * 3D 卡牌（Layer 1）
  * ============================================================ */
 
-const loader = new THREE.TextureLoader();
-loader.setCrossOrigin('anonymous');
-
 /* 贴图缓存：url → THREE.Texture。抽牌时命中缓存即可立即建牌，
  * 未命中的图并行加载、不要阻塞动画（弱网首抽的卡顿元凶）。 */
 const texCache = {};
@@ -320,10 +317,12 @@ const BACK_SRC = (() => {
   catch (e) { return 'cards/back.jpg'; }
 })();
 
-/* 加载贴图。关键：真机（尤其微信内置浏览器/弱网）图片请求可能「既不 onLoad 也不 onError」
- * 永久挂起，导致 await 永不 resolve → 抽牌死锁在 S.DEAL。这里每次尝试都带硬超时；超时或
- * 出错都会重试，最多 tries 次；全部失败才 resolve(null)（退回纯色牌面，不阻塞抽牌）。
- * 超时设 7s、重试 2 次：兼顾弱网偶发挂起与"图其实能加载"。 */
+/* 加载贴图。三层防护：
+ * ① 真机（微信/弱网）图片请求可能「既不 onLoad 也不 onError」永久挂起 → 每次尝试带硬超时。
+ * ② 超时/出错自动重试，全部失败才 resolve(null) 退回纯色牌面，不阻塞抽牌。
+ * ③ 关键：用原生 Image 加载并以 naturalWidth 校验——Cloudflare Pages 对不存在的路径
+ *    会返回 index.html（HTTP 200 + text/html），TextureLoader 会静默拿到坏图导致牌面空白。
+ *    这里 explicit 检查解码尺寸，非图片直接判失败，杜绝"加载成功却空白"。 */
 function loadTexture(url, anisotropy, tries = 2, timeout = 7000) {
   return new Promise((resolve) => {
     let attempt = 0;
@@ -331,31 +330,30 @@ function loadTexture(url, anisotropy, tries = 2, timeout = 7000) {
       if (attempt >= tries) { resolve(null); return; }
       attempt++;
       let settled = false;
-      const timer = setTimeout(() => {
+      const finish = (tex) => {
         if (settled) return;
         settled = true;
-        tryOnce();                      // 超时 → 重试
-      }, timeout);
-      loader.load(
-        url,
-        (tex) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          tex.colorSpace = THREE.SRGBColorSpace;
-          tex.anisotropy = anisotropy;
-          tex.minFilter = THREE.LinearMipmapLinearFilter;
-          tex.magFilter = THREE.LinearFilter;
-          tex.needsUpdate = true;
-          resolve(tex);
-        },
-        undefined,
-        () => {
-          if (settled) return;
-          settled = true;
-          tryOnce();                    // 出错 → 重试
-        }
-      );
+        clearTimeout(timer);
+        resolve(tex);
+      };
+      const timer = setTimeout(() => { if (!settled) { settled = true; tryOnce(); } }, timeout);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.decoding = 'async';
+      img.onload = () => {
+        if (settled) return;
+        /* 非图片内容（如被 fallback 成 HTML）尺寸为 0 → 视为失败 */
+        if (!img.naturalWidth || !img.naturalHeight) { settled = true; tryOnce(); return; }
+        const tex = new THREE.Texture(img);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = anisotropy;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.needsUpdate = true;
+        finish(tex);
+      };
+      img.onerror = () => { if (!settled) { settled = true; tryOnce(); } };
+      img.src = url;
     };
     tryOnce();
   });
