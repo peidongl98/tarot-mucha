@@ -661,6 +661,7 @@ async function startDraw() {
  * ============================================================ */
 
 function onCardHit(i) {
+  if (state === S.READING) { exitReading(); return; }   // 点击顶部牌 → 回滚筒
   if (state === S.ZOOM) {
     if (zoomIndex === i) zoomOut();
     return;
@@ -1195,14 +1196,23 @@ function setHitFace(i, flipped) {
 function updateHits() {
   const wheelView = state === S.ROW;
   const zoomView = state === S.ZOOM;
+  const inReading = state === S.READING;   // 解读视图：顶部三张牌可点击返回
   for (let i = 0; i < 3; i++) {
     const n = el.hits[i];
     if (!n) continue;
-    if (wheelView) {
-      setRect(n, scene && scene.ok ? scene.cardRect(i) : null);
+    if (wheelView || (inReading && lastReading)) {
+      setRect(n, scene && scene.ok
+        ? scene.cardRect(i)
+        : (inReading ? fallbackTopRect(i) : null));
       if (scene && scene.ok) {
-        // 越靠前的牌点击区越在上层（拖动中避免侧牌盖住居中牌）
-        n.style.zIndex = String(10 + Math.round(Math.max(0, wheelFocusCos(i)) * 10));
+        if (inReading) {
+          n.style.zIndex = '30';           // 解读视图整体 z-index 5，命中区必须压在其上
+        } else {
+          // 越靠前的牌点击区越在上层
+          n.style.zIndex = String(10 + Math.round(Math.max(0, wheelFocusCos(i)) * 10));
+        }
+      } else if (inReading) {
+        n.style.zIndex = '30';
       }
     } else if (zoomView && zoomIndex === i) {
       setRect(n, scene && scene.ok ? scene.cardRect(i) : null);
@@ -1211,6 +1221,18 @@ function updateHits() {
       n.hidden = true;
     }
   }
+}
+
+/* 无 3D 时解读视图的顶部三张牌矩形（与 computeTopSlots 同参数的屏幕版） */
+function fallbackTopRect(i) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const ch = Math.min(h * 0.17, w * 0.30 * (1 / 0.5625) * 0.5625);
+  const cw = ch * 0.5625;
+  const spread = Math.min(cw * 1.24, w * 0.30);
+  const cx = w / 2 + (i - 1) * spread;
+  const cy = h * 0.135;
+  return { x: cx - cw / 2, y: cy - ch / 2, w: cw, h: ch };
 }
 
 /* 居中标签：某张牌转到中央（对齐度足够高）时淡入并显示身份 */

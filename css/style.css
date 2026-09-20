@@ -681,46 +681,6 @@ body.no-3d .card-hit img { visibility: visible; }
   color: #E4DED0;
 }
 
-/* ---------- 上滑引导：一条向上流动的星光（无任何文字） ---------- */
-.star-hint {
-  position: fixed;
-  left: 50%;
-  bottom: 3%;
-  width: 132px;
-  height: 84px;
-  z-index: 3;
-  transform: translateX(-50%);
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 1.2s ease;
-}
-
-.star-hint.is-on { opacity: 1; }
-
-/* ---------- 滚动提示（三张全翻完，与星光引导一起出现） ---------- */
-.scroll-hint {
-  position: fixed;
-  left: 50%;
-  bottom: 13.5%;
-  transform: translateX(-50%);
-  margin: 0;
-  z-index: 3;
-  text-align: center;
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 400;
-  font-size: 13px;
-  letter-spacing: 0.14em;
-  color: var(--muted);
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 1.4s ease 0.5s;
-}
-
-.scroll-hint.is-on { opacity: 0.88; }
-
 /* ---------- Sink：三张全翻开后浮现的底部涟漪光圈（点击进入解读） ---------- */
 .sink-zone {
   position: fixed;
@@ -839,30 +799,7 @@ body.no-3d .card-hit img { visibility: visible; }
 
 .wheel-label.is-on { opacity: 0.92; }
 
-.star-hint i {
-  position: absolute;
-  bottom: -8px;
-  left: calc(50% + var(--dx, 0px));
-  width: 3px;
-  height: 3px;
-  margin-left: -1.5px;
-  border-radius: 50%;
-  background: radial-gradient(circle,
-    rgba(255, 252, 246, 0.98) 0%,
-    rgba(237, 232, 224, 0.8) 34%,
-    rgba(201, 169, 97, 0) 74%);
-  box-shadow: 0 0 7px rgba(201, 169, 97, 0.65);
-  animation: starFlow 2.9s linear infinite;
-}
-
-@keyframes starFlow {
-  0%   { transform: translateY(0) scale(0.7); opacity: 0; }
-  20%  { opacity: 0.95; }
-  72%  { opacity: 0.6; }
-  100% { transform: translateY(-92px) scale(1.05); opacity: 0; }
-}
-
-/* ---------- 解读视图（上滑后覆盖上来，页面本身不滚动） ---------- */
+/* ---------- 解读视图（覆盖上来，页面本身不滚动） ---------- */
 .reading-view {
   position: fixed;
   inset: 0;
@@ -940,13 +877,15 @@ body.no-3d .card-hit img { visibility: visible; }
   pointer-events: none;
 }
 
-/* 解读文字：独立滚动区，无边框、无背景；上下边缘淡化 */
+/* 解读文字：独立滚动区，无边框、无背景；上下边缘淡化但不遮字
+ * （上 padding 44px > 淡化带 34px，下 padding 96px ≈ 两三行留白） */
 .ai-text {
   position: absolute;
   left: 50%;
   top: var(--y-ai-text);
   bottom: var(--y-return);
   width: min(86vw, 640px);
+  padding: 44px 0 96px;
   transform: translateX(-50%) translateY(22px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;      /* 移动端惯性滚动 */
@@ -959,8 +898,8 @@ body.no-3d .card-hit img { visibility: visible; }
   opacity: 0;
   pointer-events: none;
   scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 30px, #000 calc(100% - 34px), transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 30px, #000 calc(100% - 34px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 34px, #000 calc(100% - 38px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 34px, #000 calc(100% - 38px), transparent 100%);
 }
 
 .reading-view.is-on .ai-text { pointer-events: auto; }
@@ -1146,7 +1085,6 @@ body.no-3d .card-hit img { visibility: visible; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .orb.is-aging { animation: none; }
-  .star-hint i { animation: none; opacity: 0.5; }
   .field-stream i { animation: none; opacity: 0.35; transform: translateX(40%); }
   .wheel-nav svg { animation: none; filter: drop-shadow(0 0 6px rgba(201, 169, 97, 0.6)); }
   .ai-ring.is-thinking { animation: none; }

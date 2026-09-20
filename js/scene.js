@@ -564,17 +564,18 @@ export function createTarotScene(container) {
   scene.add(cardGroup);
 
   /* ---------- 布局 ---------- */
-  /* 顶部视图的三个槽位：每次重算，避免用到过期的相机矩阵 */
+  /* 顶部视图的三个槽位：每次重算，避免用到过期的相机矩阵。
+   * 解读视图要求：三张等大、横向等距、顶部对齐、整体居中（无透视差、无倾转）。 */
   function computeTopSlots() {
     const { w, h } = size();
     const topH = Math.min(h * CONFIG.topHeightRatio, w * 0.30 * (CARD_H / CARD_W));
     const topScale = topH / worldToPixels(CARD_H, 0);
-    const topSpread = topScale * 1.18;
+    const topSpread = topScale * 1.24;
     const topC = screenToWorld(w / 2, h * CONFIG.topCenterY, 0, new THREE.Vector3());
     topSlots = [
-      { x: topC.x - topSpread, y: topC.y, z: -0.30, rotY: 0.10, scale: topScale },
+      { x: topC.x - topSpread, y: topC.y, z: 0, rotY: 0, scale: topScale },
       { x: topC.x, y: topC.y, z: 0, rotY: 0, scale: topScale },
-      { x: topC.x + topSpread, y: topC.y, z: 0.30, rotY: -0.10, scale: topScale },
+      { x: topC.x + topSpread, y: topC.y, z: 0, rotY: 0, scale: topScale },
     ];
   }
 
@@ -1322,24 +1323,6 @@ export function createTarotScene(container) {
   /* app.js 每帧同步滚筒角度 */
   api.wheelApply = function (a) { wheelAngle = a || 0; };
 
-  /* 三张牌落位后的轻微浮动 —— 仅顶部视图需要（滚筒的起伏在摆位里逐帧计算） */
-  function startRowFloat(mode) {
-    if ((mode || readingView) !== 'top') return;
-    const gsap = window.gsap;
-    if (!gsap) return;
-    current.forEach((c, i) => {
-      const s = topSlots[i];
-      if (!s) return;
-      if (c.floatTween) c.floatTween.kill();
-      c.floatTween = gsap.to(c.root.position, {
-        y: s.y + 0.045,
-        duration: 3.4 + (i % 3) * 0.5,
-        yoyo: true, repeat: -1, ease: 'sine.inOut',
-        delay: i * 0.24,
-      });
-    });
-  }
-
   function stopRowFloat() {
     current.forEach((c) => { if (c.floatTween) { c.floatTween.kill(); c.floatTween = null; } });
   }
@@ -1683,7 +1666,6 @@ export function createTarotScene(container) {
         readingView = mode;
         wheelLastOp = [-1, -1, -1];
         wheelBusy = Math.max(0, wheelBusy - 1);
-        if (mode === 'top') startRowFloat('top');
       },
     });
     current.forEach((c, i) => {
