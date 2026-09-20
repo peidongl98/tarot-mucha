@@ -99,6 +99,7 @@ const CARD_W = 1;
 const CARD_H = 1 / 0.5625;          // 牌面素材为 1080×1920，宽高比 9:16
 const COLOR_GOLD = 0xc9a961;
 const COLOR_INK = 0x0a0908;
+const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 /* ============================================================
  * 工具
@@ -705,6 +706,10 @@ export function createTarotScene(container) {
   let fanScale = 1;
   let fanH = 0;
   let fanSlots = [];
+  /* 漩涡退场需要的扇形几何（openingLayout 里算好存下） */
+  let pivotScreen = { x: 0, y: 0 };   // 扇形圆心（屏幕像素，可能在页面上方）
+  let fanRadiusPx = 1;
+  let fanCardWpx = 1;
 
   function openingLayout() {
     const { w, h } = size();
@@ -734,6 +739,8 @@ export function createTarotScene(container) {
 
     const aMax = CONFIG.fanMaxAngle;
     const radiusPx = Math.max(1, (spanPx / 2) / Math.sin(aMax));
+    fanRadiusPx = radiusPx;
+    fanCardWpx = cardWpx;
 
     // 先以圆心为原点排出每张牌（向下为正），并量出各自旋转后的竖直半高
     const raw = [];
@@ -750,6 +757,7 @@ export function createTarotScene(container) {
     const bandTop = Math.max(52, h * CONFIG.fanTopRatio);
     const bandH = Math.max(spanH, h * CONFIG.fanBandRatio);
     const pivotYpx = bandTop + (bandH - spanH) / 2 - topMost;   // 圆心的屏幕 y（可为负 = 在页面之上）
+    pivotScreen = { x: w / 2, y: pivotYpx };
 
     const pivot = screenToWorld(w / 2, pivotYpx, 0, new THREE.Vector3());
 
@@ -1331,9 +1339,103 @@ export function createTarotScene(container) {
     current.forEach((c) => { if (c.floatTween) { c.floatTween.kill(); c.floatTween = null; } });
   }
 
-  /* 抽牌：扇形旋转缩小退场，同时三张牌飞向滚筒（背面朝上）。
+  /* ============================================================
+   * 漩涡退场（抽牌动画第一~三段的连续几何）：
+   *   ① 扇形各牌绕圆心公转、向中心聚拢，收成一个圆（圆心同时从页面上方
+   *      落到屏幕内上部，保证圆可见）；
+   *   ② 圆整体向圆心收缩，旋转加速，牌在圆心缩小淡出消失；
+   *   ③ 三张牌从「消失点」出现：由小变大、边飞边散开，落到滚筒槽位
+   *      （落位轻微弹性 back.out）。
+   * 前一段终点 = 后一段起点：消失点 = 飞出起点，无生硬切换。
+   * 返回 { tl, origin, appearAt }：tl 已含①②，飞出段由 dealFromFan
+   * 续进同一条 timeline（appearAt = 三张牌出现的绝对时刻）。
+   * ============================================================ */
+  function fanVortexExit(speed) {
+    const gsap = window.gsap;
+    const { w, h } = size();
+    const cx = w / 2;
+    const cyEnd = h * 0.30;                              // 吸入消失点（屏幕上部）
+    const ringR = Math.min(fanCardWpx * 1.7, h * 0.26);  // 聚圆半径（屏幕像素）
+    const durA = 0.95 * speed;                           // ① 聚拢成圆
+    const durB = 0.62 * speed;                           // ② 吸入消失
+    const zPlane = -0.15;
+    const origin = screenToWorld(cx, cyEnd, zPlane, new THREE.Vector3());
+
+    openingState = OPENING.EXIT;
+    openingStopFloat();
+    tiltReset();
+
+    const st = { cy: pivotScreen.y };
+    /* 每张牌一个代理：角度 th（0=正下方，顺时针正）、半径 r、朝向、深度 */
+    const visN = fanSlots.length;
+    const per = openingCards.map((c, i) => {
+      const s = fanSlots[i];
+      if (!s) return { c, on: false };
+      const p = project(c.root.position);                // 当前屏幕像素
+      const dx = p.x - pivotScreen.x;
+      const dy = p.y - pivotScreen.y;
+      const th0 = Math.atan2(dx, Math.max(1, dy));
+      /* 目标：整圆均匀分布 + 额外公转 0.75 圈（取最近等价角，不绕远路） */
+      const uni = (i % Math.max(1, visN)) * (Math.PI * 2 / Math.max(1, visN)) + Math.PI;
+      const base = uni + Math.PI * 2 * 0.75;
+      const thA = base + Math.PI * 2 * Math.round((th0 - base) / (Math.PI * 2));
+      return {
+        c, on: true,
+        th: th0, r: Math.max(1, Math.hypot(dx, dy)),
+        x: 0, lean: CONFIG.fanLean,
+        thA, r0: Math.max(1, Math.hypot(dx, dy)),
+      };
+    });
+
+    const place = () => {
+      per.forEach((o) => {
+        if (!o.on) return;
+        const wx = screenToWorld(cx + Math.sin(o.th) * o.r, st.cy + Math.cos(o.th) * o.r, zPlane, wheelVec);
+        o.c.root.position.set(wx.x, wx.y, zPlane);
+        o.c.root.rotation.set(o.lean, 0, -o.th);         // 长轴沿切线 → 漩涡观感
+      });
+    };
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        openingCards.forEach((c) => { c.root.visible = false; c.setOpacity(0); });
+      },
+    });
+
+    /* ① 聚拢成圆：圆心落到屏内、半径收到 ringR、角度均匀化 + 公转 */
+    tl.to(st, { cy: cyEnd, duration: durA, ease: 'power2.inOut', onUpdate: place }, 0);
+    per.forEach((o) => {
+      if (!o.on) { o.c.root.visible = false; o.c.setOpacity(0); return; }
+      tl.to(o, { th: o.thA, duration: durA, ease: 'power2.inOut' }, 0);
+      tl.to(o, { r: ringR, duration: durA, ease: 'power2.inOut' }, 0);
+      tl.to(o, { lean: 0, duration: durA, ease: 'power2.inOut' }, 0);
+      tl.to(o.c.root.scale, {
+        x: fanScale * 0.82, y: fanScale * 0.82, z: fanScale * 0.82,
+        duration: durA, ease: 'power2.inOut',
+      }, 0);
+    });
+
+    /* ② 吸入：半径归零、旋转加速、缩小淡出（后半段消失） */
+    per.forEach((o, i) => {
+      if (!o.on) return;
+      tl.to(o, { th: o.thA + Math.PI * 2 * 1.15, duration: durB, ease: 'power3.in' }, durA);
+      tl.to(o, { r: 0, duration: durB, ease: 'power3.in' }, durA);
+      tl.to(o.c.root.scale, {
+        x: 0.02, y: 0.02, z: 0.02, duration: durB * 0.92, ease: 'power2.in',
+      }, durA);
+      tl.to({ v: 1 }, {
+        v: 0, duration: durB * 0.5, ease: 'power2.in', delay: durB * 0.38,
+        onUpdate: function () { o.c.setOpacity(this.targets()[0].v); },
+      }, durA);
+    });
+
+    return { tl, origin, appearAt: durA + durB * 0.55, cycle: durA + durB };
+  }
+
+  /* 抽牌：扇形漩涡退场（聚圆→吸入→消失），三张牌从消失点飞向滚筒（背面朝上）。
    * opts.fromDeck  起点改用单张牌背的位置（历史回看进入时用，那时没有扇形）
-   * opts.quick     0.6 倍时长（历史进入的过渡要快） */
+   * opts.quick     0.6 倍时长（历史进入的过渡要快）
+   * 返回 Promise，动画全部落位后 resolve。 */
   api.dealFromFan = async function (cards, opts) {
     const o = opts || {};
     const speed = o.quick ? 0.6 : 1;
@@ -1347,11 +1449,13 @@ export function createTarotScene(container) {
     wheelLastOp = [-1, -1, -1];
     readingView = 'wheel';
 
-    /* 1) 扇形退场：旋转 + 缩小 + 淡出（openingVanish 已处理过扇形时跳过） */
-    if (openingState === OPENING.FAN && openingGroup && openingCards.length) {
+    /* 1) 扇形漩涡退场（无 GSAP / 减弱动效 / 历史路径 → 原地缩小淡出兜底） */
+    const vortexOk = !o.fromDeck && openingState === OPENING.FAN
+      && openingGroup && openingCards.length && !!gsap && !REDUCED;
+    if (openingState === OPENING.FAN && !vortexOk) {
       openingState = OPENING.EXIT;
       openingCards.forEach((c, i) => {
-        if (!gsap) { c.setOpacity(0); return; }
+        if (!gsap) { c.setOpacity(0); c.root.visible = false; return; }
         const d = 0.05 * Math.abs(i - (openingCards.length - 1) / 2) * speed;
         gsap.to(c.root.rotation, { z: (c.root.rotation.z || 0) + (i % 2 ? 0.55 : -0.55), duration: 1.05 * speed, ease: 'power2.in', delay: d });
         gsap.to(c.root.scale, { x: 0.0001, y: 0.0001, z: 0.0001, duration: 0.95 * speed, ease: 'power2.in', delay: d });
@@ -1361,20 +1465,35 @@ export function createTarotScene(container) {
         });
       });
     }
+    let vortex = null;
+    if (vortexOk) vortex = fanVortexExit(speed);
 
-    /* 2) 三张牌：起点取扇面中间三张（或单张牌背）的位置，终点是滚筒槽位 */
-    const n = fanSlots.length || 1;
-    const mid = Math.floor(n / 2);
-    const src = [mid - 1, mid, mid + 1].map((i) => fanSlots[Math.max(0, Math.min(n - 1, i))]);
-    const turn = o.quick ? 0.5 : CONFIG.dealSpin;   // 起始多转的圈数（仪式感）
+    /* 2) 三张牌：起点 = 漩涡消失点（或牌堆位 / 扇面位），终点 = 滚筒槽位 */
+    const turn = o.quick ? 0.5 : CONFIG.dealSpin * 0.5;
+    const startPx = Math.max(26, size().h * 0.075);      // 飞出起始牌高（由小变大）
 
     current = cards.map((c, i) => {
       const card = buildCard(backTex, faces[i], anisotropy);
       card.reversed = !!c.reversed;
       card.flipped = false;
-      const s0 = o.fromDeck
-        ? { x: deckSlot.x + (i - 1) * pixelsToWorld(30, 0), y: deckSlot.y, z: deckSlot.z, scale: deckScale, rotZ: (i - 1) * 0.14 }
-        : (src[i] || { x: 0, y: 0, z: 0, rotZ: 0, scale: fanScale || cardScale });
+      let s0;
+      if (o.fromDeck) {
+        s0 = { x: deckSlot.x + (i - 1) * pixelsToWorld(30, 0), y: deckSlot.y, z: deckSlot.z, scale: deckScale, rotZ: (i - 1) * 0.14 };
+      } else if (vortex) {
+        s0 = {
+          x: vortex.origin.x + (i - 1) * pixelsToWorld(12, 0),
+          y: vortex.origin.y,
+          z: vortex.origin.z,
+          scale: pixelsToWorld(startPx, 0) / CARD_H,
+          rotZ: (i - 1) * 0.55,
+        };
+      } else {
+        const n = fanSlots.length || 1;
+        const mid = Math.floor(n / 2);
+        const src = [mid - 1, mid, mid + 1].map((k) => fanSlots[Math.max(0, Math.min(n - 1, k))]);
+        const ss = src[i] || { x: 0, y: 0, z: 0, rotZ: 0, scale: fanScale || cardScale };
+        s0 = { x: ss.x, y: ss.y, z: ss.z, scale: ss.scale, rotZ: ss.rotZ || 0 };
+      }
       card.root.scale.setScalar(s0.scale || cardScale);
       card.root.position.set(s0.x, s0.y, s0.z);
       card.root.rotation.set(CONFIG.fanLean, -Math.PI * 2 * turn, s0.rotZ || 0);
@@ -1399,34 +1518,38 @@ export function createTarotScene(container) {
       return t;
     });
 
-    if (!gsap) { wheelBusy = 0; return current; }
+    if (!gsap) { wheelBusy = 0; return Promise.resolve(current); }
     wheelBusy++;
 
-    const tl = gsap.timeline({
-      onComplete: () => {
-        current.forEach((c) => { c.flying = false; });
-        wheelBusy = Math.max(0, wheelBusy - 1);
-      },
-    });
+    /* 主 timeline：漩涡退场在前，飞出段续在消失点时刻之后 */
+    const tl = vortex ? vortex.tl : gsap.timeline();
+    const flyAt = vortex ? vortex.appearAt : 0.24 * speed;
 
     /* 逐张淡入到各自的滚筒不透明度（居中 1，侧牌 wheelDim），落位后无缝交给滚筒摆位 */
     current.forEach((c, i) => {
       const tOp = CONFIG.wheelDim + (1 - CONFIG.wheelDim) * Math.max(0, targets[i].cos);
       tl.to({ v: 0 }, {
-        v: tOp, duration: 0.55 * speed, ease: 'power2.out',
+        v: tOp, duration: 0.5 * speed, ease: 'power2.out',
         onUpdate: function () { c.setOpacity(this.targets()[0].v); },
-      }, 0.1 + 0.06 * i);
+      }, flyAt + 0.05 * speed * i);
     });
 
     current.forEach((c, i) => {
       const s = targets[i];
-      const at = 0.24 * speed + 0.16 * speed * i;
-      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25 * speed, ease: 'power3.out' }, at);
-      tl.to(c.root.rotation, { x: s.rotX, y: 0, z: 0, duration: 1.25 * speed, ease: 'power3.out' }, at);
-      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.2 * speed, ease: 'power2.inOut' }, at);
+      const at = flyAt + 0.14 * speed * i;
+      /* 由小变大、边飞边散开（位置 back.out 轻微过冲 = 落位弹性） */
+      tl.to(c.root.position, { x: s.x, y: s.y, z: s.z, duration: 1.25 * speed, ease: 'back.out(1.15)' }, at);
+      tl.to(c.root.rotation, { x: s.rotX, y: 0, z: 0, duration: 1.2 * speed, ease: 'power3.out' }, at);
+      tl.to(c.root.scale, { x: s.scale, y: s.scale, z: s.scale, duration: 1.15 * speed, ease: 'back.out(1.3)' }, at);
     });
 
-    return tl;
+    return new Promise((res) => {
+      tl.eventCallback('onComplete', () => {
+        current.forEach((c) => { c.flying = false; });
+        wheelBusy = Math.max(0, wheelBusy - 1);
+        res(current);
+      });
+    });
   };
 
   /* 翻牌：绕 Y 轴 180°；逆位牌翻完后绕 Z 轴再转 180° */
