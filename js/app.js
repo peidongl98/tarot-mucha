@@ -37,6 +37,7 @@ const DEVICE_KEY = 'tarot_device_id';   // 匿名设备标识，用于云端按�
 const LEGACY_KEY = 'tarot_history';
 
 const HOLD_MS = 1500;          // 长按返回光球（Seal）的时长：进度与光球变亮同步
+const DRAW_HOLD_MS = 1500;     // 长按光圈抽牌的判定时长（批次 A2）
 const DRAG_SLOP = 12;          // 按下到抬起的位移阈值（px）：超过就算拖动，不算点击
 
 /* 卡牌图路径：优先用 cards/w/*.webp（约 54KB/张，原 jpg 约 344KB/张，首抽从 ~1MB 降到 ~160KB）。
@@ -765,6 +766,7 @@ function openFanStage() {
   showAskArea();
   state = S.ASK;
   setOrbsVisible(false);          // 离开首页：光球淡出
+  armIdleHint();                  // 布局稳定后开始 5s 闲置计时（批次 A1）
 }
 
 /* 「仅供娱乐」过渡提示：浮出 → 停留 1.6s → 下沉消失
@@ -830,6 +832,7 @@ function setAskVisible(on, instant) {
       { opacity: 1, duration: 1.0, ease: 'power3.out', delay: 0.71, onComplete: focusOnDesktop });
     return;
   }
+  hideIdleHint();                 // 进入下一界面：闲置提示一并消失（批次 A1）
   if (instant || !gsap || REDUCED) {
     targets.forEach((n) => { n.style.opacity = '0'; n.style.visibility = 'hidden'; });
     if (el.openingField) { el.openingField.style.opacity = '0'; el.openingField.style.visibility = 'hidden'; }
@@ -871,6 +874,40 @@ function showTitle(on) {
   } else {
     t.style.visibility = 'hidden';
   }
+}
+
+/* ---------- 输入区闲置提示（批次 A1） ----------
+ * 规则：
+ *   · 开场稳定后开始计时，超过 5s 未被激活 → 出现（呼吸循环）
+ *   · 点击输入框 → 立即消失
+ *   · 失焦后：内容为空 → 重新出现（重新计时 5s）；有内容 → 不出现
+ *   · 进入下一界面 → 消失
+ * 用单一时间戳 + 一个定时器，不叠状态（"是否显示过"都由 canShowIdle 一个判断出口）。 */
+const IDLE_DELAY_MS = 5000;
+let idleTimer = 0;
+
+/* 唯一出口：什么时候该显示 */
+function idleAllowed() {
+  if (state !== S.ASK) return false;
+  if (!el.question) return false;
+  if (document.activeElement === el.question) return false;   // 正在输入
+  return (el.question.value || '').trim().length === 0;       // 有内容则不显示
+}
+
+function hideIdleHint() {
+  if (idleTimer) { window.clearTimeout(idleTimer); idleTimer = 0; }
+  if (el.idleHint) el.idleHint.classList.remove('is-on');
+}
+
+/* 重新起 5s 计时（失焦 / 回到提问页时调用） */
+function armIdleHint() {
+  hideIdleHint();
+  if (state !== S.ASK) return;
+  idleTimer = window.setTimeout(() => {
+    idleTimer = 0;
+    if (!idleAllowed() || !el.idleHint) return;
+    el.idleHint.classList.add('is-on');
+  }, IDLE_DELAY_MS);
 }
 
 /* 桌面端自动落焦点，用户可以直接开始打字；移动端不自动唤起键盘 */
@@ -959,6 +996,39 @@ function dealTimeout(ms) {
   return new Promise((_, rej) => setTimeout(() => rej(new Error('deal-timeout ' + ms)), ms));
 }
 
+/* ---------- 长按光圈抽牌（批次 A2，替代原来的「点击即抽」） ----------
+ * 流程（总时长约 3s）：
+ *   ① 按住 → 立刻进入聚光态：输入区发光，光向圆心汇聚
+ *   ② 满 1.5s → 判定成功：光圈炸开 + 转场（startDraw 自己的动画约 1.5s）
+ *   ③ 中途松手 → 停一下再回退（CSS transition 的延迟回落），光散去
+ * 状态由 dataset 上的标记 + 一个定时器承载；不做 if/else 嵌套。
+ * 输入框为空也允许抽牌（不强制填内容）。 */
+let drawHoldTimer = 0;
+
+function beginDrawHold(e) {
+  if (state !== S.ASK || drawHoldTimer || !el.ringBtn) return;
+  try { el.ringBtn.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+  el.ringBtn.classList.add('is-gathering');
+  if (el.openingField) el.openingField.classList.add('is-glow');   // 输入区同步发光
+  drawHoldTimer = window.setTimeout(() => {
+    drawHoldTimer = 0;
+    el.ringBtn.classList.remove('is-gathering');
+    el.ringBtn.classList.add('is-bursting');     // 炸开：光猛地一扩，然后交给 startDraw
+    if (el.openingField) el.openingField.classList.remove('is-glow');
+    try { if (navigator.vibrate) navigator.vibrate(18); } catch (err) { /* 忽略 */ }
+    startDraw();
+  }, DRAW_HOLD_MS);
+}
+
+function endDrawHold() {
+  if (!drawHoldTimer) return;                    // 已判定成功：不动（让转场继续）
+  window.clearTimeout(drawHoldTimer);
+  drawHoldTimer = 0;
+  /* 中途松手：停一下再回退（CSS 的 transition-delay 负责「停留一下」） */
+  if (el.ringBtn) el.ringBtn.classList.remove('is-gathering');
+  if (el.openingField) el.openingField.classList.remove('is-glow');
+}
+
 async function startDraw() {
   if (state !== S.ASK) return;
   state = S.DEAL;
@@ -976,6 +1046,9 @@ async function startDraw() {
   setInputLocked(true);
   setInputFocused(false);
   resetKeyboardState();          // 离开提问环节：清暗淡 + 清键盘态残留
+  hideIdleHint();                // 闲置提示一并收起
+  if (el.ringBtn) el.ringBtn.classList.remove('is-gathering', 'is-bursting');
+  if (el.openingField) el.openingField.classList.remove('is-glow');
   showSink(false);
   setAiRingVisible(true);
   setAiThinking(false);
@@ -2119,6 +2192,7 @@ function cacheDom() {
   el.openingQuestion = document.getElementById('openingQuestion');
   el.openingField = document.querySelector('.opening-field');
   el.openingHint = document.querySelector('.opening-hint');
+  el.idleHint = document.getElementById('idleHint');
   el.ringBtn = document.getElementById('ringBtn');
   el.question = document.getElementById('question');
   el.drawHint = document.getElementById('drawHint');
@@ -2205,7 +2279,13 @@ function init() {
   el.hits.forEach((n, i) => { if (n) n.addEventListener('click', () => onCardHit(i)); });
   if (el.navPrev) el.navPrev.addEventListener('click', () => wheelStepTo(-1));
   if (el.navNext) el.navNext.addEventListener('click', () => wheelStepTo(1));
-  if (el.ringBtn) el.ringBtn.addEventListener('click', startDraw);
+  /* 光圈：长按 1.5s 抽牌（批次 A2，替代原点击即抽） */
+  if (el.ringBtn) {
+    el.ringBtn.addEventListener('pointerdown', beginDrawHold);
+    el.ringBtn.addEventListener('pointerup', endDrawHold);
+    el.ringBtn.addEventListener('pointercancel', endDrawHold);
+    el.ringBtn.addEventListener('contextmenu', (e) => e.preventDefault());   // 长按不弹菜单
+  }
   if (el.question) {
     /* textarea：禁止换行（粘贴的多行折叠成空格），输入即同步流光/光圈与自适应 */
     el.question.addEventListener('input', () => {
@@ -2215,7 +2295,13 @@ function init() {
       }
       syncRing();
       fitQuestion();
+      /* 闲置提示（批次 A1）：有内容立刻收起，清空后重新计时 */
+      if ((el.question.value || '').trim().length) hideIdleHint();
+      else if (document.activeElement !== el.question) armIdleHint();
     });
+    /* 点击输入框（获得焦点）→ 立即消失；失焦且无内容 → 重新计时后出现 */
+    el.question.addEventListener('focus', hideIdleHint);
+    el.question.addEventListener('blur', () => { if (idleAllowed()) armIdleHint(); });
     el.question.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); startDraw(); }
     });

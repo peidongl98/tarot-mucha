@@ -143,6 +143,13 @@
     <!-- 2. 神秘问句 -->
     <p class="opening-question" id="openingQuestion">Whisper your question…</p>
 
+    <!-- 2b. 闲置提示：开场稳定后 5s 未激活输入框时出现（严格两行，不可增删）。
+         由 app.js 的 armIdleHint 控制显隐；点击输入框 / 进入下一界面即消失。 -->
+    <p class="idle-hint" id="idleHint" aria-hidden="true">
+      <span class="idle-hint-en">No question? Fate already knows.</span>
+      <span class="idle-hint-cn">无从问起，命运已知</span>
+    </p>
+
     <!-- 3. 无框输入区（textarea：固定三行高，超出逐步缩字号，仍放不下再滚动；下方流光） -->
     <div class="opening-field">
       <textarea id="question" class="opening-input" maxlength="200" rows="1"

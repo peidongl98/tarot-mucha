@@ -542,6 +542,50 @@ body.orb-deleting .opening-orbs { touch-action: none; }
   transition: filter 0.45s ease, opacity 0.4s ease;
 }
 
+/* ---------- 4b. 输入区闲置提示（批次 A1） ----------
+ * 严格两行：上英文、下中文。字号比 .opening-question 小一档、斜体花体同源。
+ * 各自一行不换行：white-space: nowrap + 溢出兜底的自适应字号
+ * （同 .opening-hint 用 vw + clamp 控制，宽屏不会放大到换行）。
+ * 作为 .ask-cluster 的 flex 项参与排版，不定位、不动别的层。 */
+.idle-hint {
+  position: static;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: center;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;          /* 纯提示，不拦截输入框/牌背点击 */
+  transition: opacity 0.6s ease;
+}
+
+.idle-hint-en,
+.idle-hint-cn {
+  display: block;
+  white-space: nowrap;           /* 各自一行：禁止换行 */
+  line-height: 1.6;
+}
+
+/* 英文行略大、字距松；中文行由系统栈兜底（花体无中文字形） */
+.idle-hint-en { font-size: clamp(13px, 3.1vw, 17px); letter-spacing: 0.05em; }
+.idle-hint-cn { font-size: clamp(12px, 2.9vw, 16px); letter-spacing: 0.12em; }
+
+/* 出现态：呼吸式渐隐渐现（循环）。
+ * 用同一 animation 跑 opacity，两个 keyframe 共用 → 两行严格同步呼吸。 */
+.idle-hint.is-on { opacity: 1; animation: idleBreathe 3.6s ease-in-out infinite; }
+
+@keyframes idleBreathe {
+  0%, 100% { opacity: 0.26; }
+  50%      { opacity: 0.86; }
+}
+
+/* 键盘态：与问句/光圈/提示一起隐去（沿用同一套规则，位置不变只改 opacity） */
+
 /* ---------- 5. 无框输入框 ---------- */
 /* 提问聚簇：问句 → 输入框 → 提示 → 光圈（光球在聚簇最底部），
  * 垂直方向由 flex 控制间距，任意屏幕高度 / 任意输入行数都不重叠。
@@ -610,6 +654,9 @@ body.kb-open .opening-hint {
   transition: opacity 0.32s ease;
   pointer-events: none;
 }
+
+/* 闲置提示同样在键盘态隐去（它挂在问句下方，被键盘遮住不如隐去） */
+body.kb-open .idle-hint { animation: none; opacity: 0 !important; }
 
 .opening-input {
   display: block;
@@ -715,7 +762,10 @@ body.kb-open .opening-hint {
   opacity: 0;
   pointer-events: auto;
   box-shadow: inset 0 0 16px rgba(201, 169, 97, 0.05);
-  transition: border-color 0.85s ease, box-shadow 0.85s ease;
+  /* 回退缓动（批次 A2）：松手后「停留一下再回退」由 0.28s 的 delay 实现。
+   * 按下态另写 transition 覆盖为 1.5s linear（光缓慢收拢）。 */
+  transition: transform 0.55s cubic-bezier(0.34, 1.36, 0.64, 1) 0.28s,
+              border-color 0.85s ease, box-shadow 0.85s ease;
 }
 
 /* 光圈上下留出比统一 gap 更大的呼吸位 —— 它是圆形、视觉重量大，
@@ -768,6 +818,47 @@ body.kb-open .opening-hint {
   10%  { opacity: 0.52; }
   70%  { opacity: 0.16; }
   100% { transform: translate(-50%, -50%) scale(2.75); opacity: 0; }
+}
+
+/* ---------- 长按光圈抽牌（批次 A2） ----------
+ * is-gathering：按住期间，光圈提亮收缩（光向圆心汇聚）+ 输入区同步发光。
+ * is-bursting：判定成功瞬间猛地一扩（炸开），随后交给 startDraw 的转场动画。
+ * 回退用 transition-delay：中途松手后「停留一下再回退」。 */
+.opening-ring.is-gathering {
+  border-color: rgba(233, 207, 152, 0.98);
+  box-shadow:
+    0 0 62px -4px rgba(214, 182, 110, 0.72),
+    0 0 120px -22px rgba(214, 182, 110, 0.42),
+    inset 0 0 46px rgba(214, 182, 110, 0.52);
+  filter: brightness(1.42);
+  transform: scale(0.86);                       /* 光向圆心收拢 */
+  transition: transform 1.5s linear, border-color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+/* 松手：不停顿立即回退是「生硬」，用 0.28s 延迟做出「停留一下」的观感。
+ * 该延迟写在基础 .opening-ring 的 transition 里（见上）。 */
+
+/* 按住时输入区发光。
+ * ⚠️ 不要给 .opening-field 加 filter —— 它在键盘态是 position:fixed，
+ * 而 filter 会成为 fixed 后代的包含块，可能劫持定位（见 skill 里的同类坑）。
+ * 只提亮流光线条与文字色，不动容器。 */
+.opening-field.is-glow .field-stream i {
+  opacity: 1;
+  box-shadow: 0 0 18px 2px rgba(214, 182, 110, 0.75);
+}
+.opening-field.is-glow .opening-input {
+  color: #FFF6E2;
+  text-shadow: 0 0 16px rgba(214, 182, 110, 0.55);
+}
+
+.opening-ring.is-bursting {
+  animation: ringBurst 0.42s cubic-bezier(0.16, 1.16, 0.3, 1) forwards;
+}
+
+@keyframes ringBurst {
+  0%   { transform: scale(0.86); opacity: 1; }
+  38%  { transform: scale(1.5);  opacity: 1; }
+  100% { transform: scale(2.6);  opacity: 0; }
 }
 
 /* 点击（后续批次才触发抽牌）的轻微反馈 */
