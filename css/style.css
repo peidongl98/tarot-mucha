@@ -106,17 +106,22 @@ body:not(.has-draw) .site-footer { display: none; }
 /* ============================================================
    Layer 0：WebGL 画布
    ============================================================ */
-/* 结构解耦（问题 1）：把 100lvh 直接下到 <canvas>，wrapper 不再持有任何视口单位。
- * 原因：Safari 会对「wrapper 用 lvh + canvas 用 %」这条解析链重算容器高
- * （iOS 会在 UI 收放 / 键盘弹出时重新求值 wrapper 的 lvh），一旦重算，
- * canvas 的 % 高度随之变化 → render buffer 未重设 → 画面被拉伸变形。
- * 现在 canvas 自己吃 lvh（键盘与地址栏都不会让它缩小），wrapper 只是定位外壳。 */
+/* 结构解耦（问题 1，第三次修，本次彻底）：
+ * 画布尺寸**不持有任何视口单位**，改用 JS 在首次布局时写入的 px 变量
+ * --gl-w / --gl-h（.gl-layer 与 canvas 共用同一对数字）。
+ * 原因：lvh / svh 都是「活」的单位 —— 规范只管地址栏，键盘如何影响布局视口
+ * 由内核自行决定。桌面 Chrome/Safari（Chrome 108+ 起）默认只缩视觉视口，
+ * 所以 lvh 不动；但微信 X5 会主动改视口高（含改写 window.innerHeight），
+ * 一旦 lvh 被重算 → canvas 盒高变 → camera.aspect 变 → 扇形牌被重排压扁。
+ * 写死 px 后，键盘弹出时 CSS 属性一个都不变，与任何内核的视口策略无关。
+ * 变量只允许在「真变化」时更新（由 app.js 的 syncCanvas 判定并写入）。 */
 .gl-layer {
   position: fixed;
   left: 0;
   right: 0;
   top: 0;
-  height: 100lvh;                        /* 定位外壳兜底，与 canvas 同源 */
+  width: var(--gl-w, 100vw);             /* 兜底视口值只在变量尚未写入时生效 */
+  height: var(--gl-h, 100lvh);
   z-index: 0;
   pointer-events: none;
   transition: filter 0.45s ease;
@@ -127,8 +132,8 @@ body:not(.has-draw) .site-footer { display: none; }
   position: absolute;                    /* 脱离 wrapper 的盒模型，不吃 % 解析链 */
   left: 0;
   top: 0;
-  width: 100vw;
-  height: 100lvh;                        /* ← 画布自身的固定尺寸，与视口事件完全解耦 */
+  width: var(--gl-w, 100vw);
+  height: var(--gl-h, 100lvh);           /* ← 与 --gl-w/--gl-h 同源，键盘改不动它 */
   max-height: none;
 }
 
@@ -177,7 +182,7 @@ body:not(.has-draw) .site-footer { display: none; }
 .opening {
   position: relative;
   z-index: 1;
-  height: var(--vph);       /* 锁定视口高（JS 写入 px）：键盘弹出时布局不挤压 */
+  height: var(--vph);       /* 100svh：小视口高，地址栏伸缩不跳动（画布另走 --gl-h px） */
 }
 
 /* ---------- 开场过渡提示（点牌背 → 扇形展开之间） ----------

@@ -1960,8 +1960,8 @@ function fitQuestion() {
 
 /* ============================================================
  * 视口锁定 + 键盘自适应（visualViewport）
- * 主布局与 3D 画布的高度锁定在「无键盘视口高」（--vph），
- * 键盘弹出（宽不变、高骤缩）不触发 resize，只上浮输入区。
+ * DOM 主布局用 --vph（svh）；3D 画布用 --gl-w/--gl-h（px，见 syncCanvas）。
+ * 键盘弹出（宽不变、高骤缩）不改画布、只上浮输入区。
  * ============================================================ */
 
 /* ============================================================
@@ -2098,30 +2098,45 @@ function syncKeyboard() {
   try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
 }
 
-/* 画布尺寸：只在窗口宽高真变了时才重排（键盘弹出不动画布）。
- * 结构解耦后这里不含任何「键盘态判断」—— 判据只有一条：画布盒尺寸是否真的变了。
- * scene.layout() 自身也做了幂等（尺寸未变直接 return），两条保险互不依赖。 */
+/* 画布尺寸锁定（问题 1，第三次修，本次彻底）：
+ * canvas 的 CSS 尺寸改由 px 变量 --gl-w / --gl-h 提供（见 style.css 的 .gl-layer），
+ * 这里只在「真变化」时写变量。判据只有两条，都不依赖内核的键盘策略：
+ *   ① 宽度变了  → 旋转 / 分屏 / 窗口缩放，必须重排
+ *   ② 高度变大了 → 地址栏收起后的更大视口，可以重排（把画布拉高，不留黑边）
+ * 高度变小（键盘弹出 / 地址栏展开）**一律忽略** —— 这正是本 bug 的入口，
+ * 现在从结构上就进不来，不需要任何 focus/kb 状态判断。
+ * 首帧必须先写入一次变量，否则 CSS 会用到 100lvh 兜底值。 */
 let lastW = 0;
 let lastH = 0;
-function syncCanvas() {
+
+function applyCanvasBox() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  if (w === lastW && h === lastH) return;
+  if (!w || !h) return false;
+  if (w === lastW && h <= lastH) return false;      // 宽度没变 + 高度没变大 → 不动
   lastW = w;
   lastH = h;
+  const root = document.documentElement;
+  root.style.setProperty('--gl-w', w + 'px');
+  root.style.setProperty('--gl-h', h + 'px');
+  return true;
+}
+
+function syncCanvas() {
+  if (!applyCanvasBox()) return;
   if (scene && scene.ok) scene.resize();
 }
 
 function onViewportChange() {
   syncKeyboard();
-  /* 不再用 focusOn 做判断（那是"用 JS 挡"，时序一交错就漏）。
-   * 直接让 syncCanvas 走幂等比对：真 resize（旋转/分屏）才重排。 */
+  /* 画布尺寸由 syncCanvas 自己判据（宽度变 / 高度变大才动），不依赖焦点时序。 */
   syncCanvas();
 }
 
 function setupViewport() {
-  lastW = window.innerWidth;
-  lastH = window.innerHeight;
+  /* 首帧：把画布尺寸以 px 写进 --gl-w/--gl-h（applyCanvasBox 会顺手记下 lastW/lastH）。
+   * 之后键盘相关的 resize 一律被「高度没变大」这条挡掉，不会走到 scene.resize()。 */
+  applyCanvasBox();
   syncKeyboard();
 
   window.addEventListener('resize', onViewportChange);

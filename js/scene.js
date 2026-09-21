@@ -606,16 +606,16 @@ export function createTarotScene(container) {
   }
 
   /* 画布尺寸：不再读 container.clientHeight（问题 1 的结构性修复）。
-   * clientHeight 是 wrapper 的布局盒高，Safari 在键盘弹出 / UI 收放时会重新求值它，
+   * clientHeight 是 wrapper 的布局盒高，内核在键盘弹出 / UI 收放时会重新求值它，
    * 一旦变小 → camera.aspect 变化 → 扇形牌被重排 + 画面被拉伸。
-   * 现在改成「读 canvas 自己的 offsetHeight」：canvas 由 CSS 固定为 100lvh/100vw，
-   * 键盘与地址栏都不会让它缩小 → 这个尺寸天然稳定。
-   * 兜底仍保留 innerWidth/innerHeight，防 canvas 尚未挂载的首次布局。 */
+   * 现在读「canvas 自己的 offsetWidth/offsetHeight」：canvas 的 CSS 尺寸由
+   * --gl-w/--gl-h（px，JS 写入）提供，键盘与地址栏都改不动 → 尺寸天然稳定。
+   * 兜底只在 canvas 尚未挂载时生效（innerWidth/innerHeight），正常路径不会走到。 */
   let sizeCache = { w: 0, h: 0 };
   const size = () => {
     const cv = renderer && renderer.domElement;
-    const w = (cv && cv.offsetWidth) || container.clientWidth || window.innerWidth;
-    const h = (cv && cv.offsetHeight) || container.clientHeight || window.innerHeight;
+    const w = (cv && cv.offsetWidth) || window.innerWidth;
+    const h = (cv && cv.offsetHeight) || window.innerHeight;
     /* 缓存同一个对象：上层多处解构使用，避免每次调用产生新对象 */
     if (w !== sizeCache.w || h !== sizeCache.h) sizeCache = { w, h };
     return sizeCache;
@@ -740,7 +740,7 @@ export function createTarotScene(container) {
     const { w, h } = size();
     /* 尺寸未变：直接返回，绝不重排（相机矩阵与 render buffer 都不需要动）。
      * 5px 容差：真机偶发 1~2px 抖动不该触发整场重排。 */
-    if (Math.abs(w - appliedW) < 5 && Math.abs(h - appliedH) < 5 && appliedW) return;
+    if (Math.abs(w - appliedW) < 5 && Math.abs(h - appliedH) < 5 && appliedW) return false;
     appliedW = w;
     appliedH = h;
     renderer.setPixelRatio(dpr);
@@ -788,6 +788,7 @@ export function createTarotScene(container) {
       }
     });
     camera.updateProjectionMatrix();
+    return true;
   }
 
   /* ---------- 屏幕投影（给 DOM 标签对齐用） ---------- */
@@ -1978,38 +1979,43 @@ export function createTarotScene(container) {
   };
 
   api.resize = function () {
-    layout();
-    // 滚筒视图的摆位逐帧重算，无需处理；只有顶部视图需要按新尺寸复位
-    if (current.length && readingView === 'top') {
-      current.forEach((c, i) => {
-        if (i === zoomed) return;
-        const s = topSlots[i];
-        if (!s) return;
-        c.root.scale.setScalar(s.scale);
-        c.root.position.set(s.x, s.y, s.z);
-        c.root.rotation.set(0, s.rotY, 0);
-      });
-    }
-    if (!openingGroup || openingBusy) return;
-    // 屏幕坐标反算世界坐标，所以尺寸变化后必须重算并复位
-    const wasFloating = openingState === OPENING.FAN;
-    openingStopFloat();
-    openingLayout();
+    const reflowed = layout();
+    /* layout() 幂等早退时（画布尺寸没变）**不要**动开场牌：
+     * 旧写法在这里无条件重算 openingLayout() + 复位牌位，等于「用 JS 挡」没挡住 ——
+     * 任何一次多余 resize 事件都会让扇形牌瞬间重排一次（表现为抽一下/压一下）。
+     * 现在只认 layout() 的返回值：真重排过才复位扇形。 */
+    if (reflowed) {
+      if (current.length && readingView === 'top') {
+        current.forEach((c, i) => {
+          if (i === zoomed) return;
+          const s = topSlots[i];
+          if (!s) return;
+          c.root.scale.setScalar(s.scale);
+          c.root.position.set(s.x, s.y, s.z);
+          c.root.rotation.set(0, s.rotY, 0);
+        });
+      }
+      if (!openingGroup || openingBusy) return;
+      // 屏幕坐标反算世界坐标，所以尺寸变化后必须重算并复位
+      const wasFloating = openingState === OPENING.FAN;
+      openingStopFloat();
+      openingLayout();
 
-    if (openingState === OPENING.FAN) {
-      openingCards.forEach((c, i) => {
-        const s = fanSlots[i];
-        if (!s) return;
-        c.root.scale.setScalar(fanScale);
-        c.root.position.set(s.x, s.y, s.z);
-        c.root.rotation.set(CONFIG.fanLean, 0, s.rotZ);
-      });
-      if (wasFloating) openingStartFloat();
-    } else if (openingState === OPENING.DECK && openingCards[0]) {
-      openingCards[0].root.scale.setScalar(deckScale);
-      openingCards[0].root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
-      // 单张牌用「原地轻摆」，不能用扇形那套（否则会漂到扇形的槽位上）
-      if (openingCards[0].root.visible) openingFloatDeck();
+      if (openingState === OPENING.FAN) {
+        openingCards.forEach((c, i) => {
+          const s = fanSlots[i];
+          if (!s) return;
+          c.root.scale.setScalar(fanScale);
+          c.root.position.set(s.x, s.y, s.z);
+          c.root.rotation.set(CONFIG.fanLean, 0, s.rotZ);
+        });
+        if (wasFloating) openingStartFloat();
+      } else if (openingState === OPENING.DECK && openingCards[0]) {
+        openingCards[0].root.scale.setScalar(deckScale);
+        openingCards[0].root.position.set(deckSlot.x, deckSlot.y, deckSlot.z);
+        // 单张牌用「原地轻摆」，不能用扇形那套（否则会漂到扇形的槽位上）
+        if (openingCards[0].root.visible) openingFloatDeck();
+      }
     }
   };
 
