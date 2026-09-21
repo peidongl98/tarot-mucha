@@ -113,7 +113,12 @@
   </svg>
   <div class="ai-text" id="aiText" aria-live="polite"></div>
   <p class="seal-label" aria-hidden="true">Seal</p>
+  <!-- Seal 光球（问题 3 重做）：空心圆 + 三层涟漪 + 长按聚集成实心。
+       结构与开场/提问页光圈一致（.ring-wave × 3 做涟漪），长按由 .is-holding 驱动。 -->
   <button id="returnOrb" class="return-orb" type="button" aria-label="Hold to seal and return">
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
+    <span class="ring-wave"></span>
     <span class="return-orb-core"></span>
   </button>
 </section>

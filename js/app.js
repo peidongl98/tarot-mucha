@@ -1205,7 +1205,9 @@ function enterReading() {
   showSink(false);
   if (scene && scene.ok) scene.setView('top');
   el.readingView.classList.add('is-on');
-  el.returnOrb.classList.add('is-on');
+  /* 问题 3.3：Seal 不在这里出现。改为「解读内容滚到底部」时才浮出
+   * （见 armSealReveal，由 aiText 的 scroll 监听 / 内容不足时的延迟兜底驱动）。 */
+  armSealReveal();
   if (lastAiText) {
     showAiText(lastAiText, true);      // 缓存命中（重复进出 / 历史回看）：直接显示，不重复调用
   } else {
@@ -1218,12 +1220,55 @@ function enterReading() {
   updateHits();
 }
 
+/* ---------- Seal 光球的出现时机（问题 3.3） ----------
+ * 规则：只有用户把解读区滚到底部才让它出现。
+ *   · 内容可滚动 → 靠 scroll 监听「已到底」触发
+ *   · 内容不足以滚动 → 文字展示完成后延迟 1s 出现
+ * 用 token 做代际隔离：离开解读 / 重新进入会把旧的一次性触发作废，
+ * 不需要在别处再写清理逻辑（避免条件嵌套）。 */
+let sealToken = 0;
+
+function revealSeal() {
+  if (state !== S.READING || !el.returnOrb) return;
+  el.returnOrb.classList.add('is-on');
+}
+
+function armSealReveal() {
+  sealToken++;
+  if (!el.returnOrb) return;
+  el.returnOrb.classList.remove('is-on', 'is-holding', 'is-sealed');
+}
+
+/* 内容不足以滚动时：以「文字浮现动画结束」为起点再等 1s（问题 3.3 原文口径）。
+ * 文字整体上浮 1.25s → 这里 1400ms 后判定不可滚动，再等 1000ms 浮出。 */
+function armSealFallback() {
+  const token = sealToken;
+  window.setTimeout(() => {
+    if (token !== sealToken || state !== S.READING) return;
+    const box = el.aiText;
+    if (!box) return;
+    if (box.scrollHeight <= box.clientHeight + 2) revealSeal();
+  }, 1000);
+}
+
+/* 解读区滚动：到底即放 Seal 出来（无条件嵌套，单层判断） */
+function onAiScroll() {
+  if (state !== S.READING || !el.returnOrb) return;
+  if (el.returnOrb.classList.contains('is-on')) return;
+  const box = el.aiText;
+  if (!box) return;
+  if (box.scrollHeight <= box.clientHeight + 2) return;   // 不可滚动的交给延迟兜底
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+  if (atBottom) revealSeal();
+}
+
 function exitReading() {
   if (state !== S.READING) return;
   state = S.ROW;
   if (scene && scene.ok) scene.setView('row');
   el.readingView.classList.remove('is-on');
-  el.returnOrb.classList.remove('is-on');
+  sealToken++;                                   // 作废这一次的「延迟兜底」触发
+  el.returnOrb.classList.remove('is-on', 'is-holding', 'is-sealed');
   if (cardsFlipped.every(Boolean)) showSink(true);
   updateHits();
 }
@@ -1310,6 +1355,7 @@ function showAiText(text) {
   if (REDUCED || !gsap) {
     el.aiText.classList.add('is-on');
     setAiRingVisible(false);
+    armSealFallback();          // 无动画时「展示完成」= 立刻，再等 1s
     return;
   }
 
@@ -1455,7 +1501,9 @@ function startHold(e) {
   el.returnOrb.classList.add('is-holding');
   holdTimer = window.setTimeout(() => {
     holdTimer = null;
-    el.returnOrb.classList.remove('is-holding');
+    /* 满格：光已聚实（.is-holding 的 sealGather 走完）→ 切到封存态。
+     * 两者同时挂在元素上，后一条动画接管，不会叠加播放。 */
+    el.returnOrb.classList.add('is-sealed');
     /* 触觉反馈：长按完成瞬间轻微震动（不支持则静默跳过） */
     try { if (navigator.vibrate) navigator.vibrate(18); } catch (err) { /* 忽略 */ }
     finishAndReturn();
@@ -1464,6 +1512,8 @@ function startHold(e) {
 
 function cancelHold() {
   if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  /* 松手太早：撤掉 is-holding，sealGather 立即停播 → 光退回空心呼吸态。
+   * 不动 is-sealed（那只在满格时加），所以「按满后松手」不会被打回空心。 */
   if (el.returnOrb) el.returnOrb.classList.remove('is-holding');
 }
 
@@ -2178,6 +2228,8 @@ function init() {
     el.returnOrb.addEventListener('pointercancel', cancelHold);
     el.returnOrb.addEventListener('contextmenu', (e) => e.preventDefault());   // 长按不弹菜单
   }
+  /* Seal 出现时机：解读区滚到底 → 浮出（问题 3.3） */
+  if (el.aiText) el.aiText.addEventListener('scroll', onAiScroll, { passive: true });
   if (el.orbRow) {
     const pick = (target) => {
       const orb = target && target.closest ? target.closest('.orb') : null;

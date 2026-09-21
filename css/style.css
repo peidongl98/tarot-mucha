@@ -1467,7 +1467,10 @@ body.no-3d .card-hit img { visibility: visible; }
   100% { transform: scale(6.4); opacity: 0; }
 }
 
-/* 返回光球（长按 → 炸成星光 + 飞向顶部 + 生成新记录光球） */
+/* 返回光球（Seal）：问题 3 重做
+ *   外观 = 空心圆 + 三层涟漪 + 缓慢呼吸，与开场/提问页光圈同一套语言
+ *   长按 = 光从四周向圆心聚集（空心 → 实心），满格触发封存
+ *   出现 = 不提前出现，由 .is-on 控制（app.js 在「滚到解读底部」时才加） */
 .return-orb {
   position: absolute;
   left: 50%;
@@ -1477,91 +1480,73 @@ body.no-3d .card-hit img { visibility: visible; }
   margin: 0 0 0 -22px;
   padding: 0;
   background: none;
-  border: 0;
+  border: 1px solid rgba(201, 169, 97, 0.30);   /* 空心圆：与 .opening-ring 同款细边 */
+  border-radius: 50%;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;      /* 长按不弹系统菜单 */
   user-select: none;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.9s ease;
+  box-shadow: inset 0 0 16px rgba(201, 169, 97, 0.06);
+  /* 出现方式：从底部浮上来（问题 3.3）—— 只动 transform + opacity，纯合成属性 */
+  transform: translateY(18px);
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.return-orb.is-on { opacity: 1; pointer-events: auto; }
-
-/* Seal 标识：光球上方（仅标识用途，不加 hold 提示文字，靠动效引导） */
-.seal-label {
-  position: absolute;
-  left: 50%;
-  bottom: calc(9% + 58px);
-  transform: translateX(-50%);
-  margin: 0;
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 400;
-  font-size: 13px;
-  letter-spacing: 0.42em;
-  text-indent: 0.42em;
-  color: var(--muted);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.9s ease 0.25s;
+.return-orb.is-on {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
-.reading-view.is-on .seal-label { opacity: 0.85; }
+/* 涟漪：与开场光圈完全一致的三层扩散，仅在 .is-on 之后跑 */
+.return-orb.is-on .ring-wave {
+  animation: ringWave 4.6s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
+}
+.return-orb.is-on .ring-wave:nth-child(2) { animation-delay: 1.5s; }
+.return-orb.is-on .ring-wave:nth-child(3) { animation-delay: 3.0s; }
 
+/* 长按聚集：核心圆从「完全透明」逐渐聚成「实心亮圆」。
+ * 直接动 background-size + opacity（不引入 scale，避免与容器 transform 打架）；
+ * 用 1.5s linear 与 JS 的 HOLD_MS 严格同步。 */
 .return-orb-core {
-  display: block;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 3px;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 42%,
-    rgba(255, 252, 244, 0.98) 0%,
-    rgba(233, 214, 168, 0.92) 30%,
-    rgba(201, 169, 97, 0.78) 58%,
-    rgba(201, 169, 97, 0.14) 100%);
-  box-shadow:
-    0 0 14px rgba(201, 169, 97, 0.5),
-    0 0 30px rgba(201, 169, 97, 0.2);
+  background: radial-gradient(circle at 50% 50%,
+    rgba(255, 250, 238, 0.98) 0%,
+    rgba(233, 214, 168, 0.94) 34%,
+    rgba(201, 169, 97, 0.86) 62%,
+    rgba(201, 169, 97, 0.00) 100%);
+  opacity: 0;                        /* 静止态：完全空心 */
+  transform: scale(0.42);            /* 光从圆心往外长 */
+  transition: opacity 0.45s ease, transform 0.45s ease;
+  will-change: transform, opacity;
 }
 
-/* 呼吸引导：默认缓慢呼吸（比普通光球更慢更明显），暗示「可长按」 */
+/* 缓慢呼吸：空心 → 微亮 → 空心，暗示「可长按」。只动 opacity（合成器友好）。 */
 .return-orb.is-on .return-orb-core {
-  animation: sealBreathe 3.6s ease-in-out infinite;
+  animation: sealBreathe 4.2s ease-in-out infinite;
 }
 
 @keyframes sealBreathe {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.68;
-    box-shadow: 0 0 10px rgba(201, 169, 97, 0.32), 0 0 22px rgba(201, 169, 97, 0.12);
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 1;
-    box-shadow: 0 0 18px rgba(201, 169, 97, 0.62), 0 0 42px rgba(201, 169, 97, 0.28);
-  }
+  0%, 100% { opacity: 0.10; transform: scale(0.42); }
+  50%      { opacity: 0.34; transform: scale(0.56); }
 }
 
-/* 长按进度：按住时光球逐渐变亮变实，与 1.5s 进度同步 */
+/* 长按：光向圆心聚集，空心 → 实心（1.5s，与 HOLD_MS 同步） */
 .return-orb.is-holding .return-orb-core {
-  animation: holdGlow 1.5s linear forwards;
+  animation: sealGather 1.5s linear forwards;
 }
 
-@keyframes holdGlow {
-  0% {
-    transform: scale(1);
-    filter: brightness(1);
-    box-shadow: 0 0 10px rgba(201, 169, 97, 0.32), 0 0 22px rgba(201, 169, 97, 0.12);
-  }
-  100% {
-    transform: scale(1.42);
-    filter: brightness(1.55);
-    box-shadow: 0 0 30px rgba(201, 169, 97, 0.9), 0 0 72px rgba(201, 169, 97, 0.5);
-  }
+@keyframes sealGather {
+  0%   { opacity: 0.12; transform: scale(0.42); }
+  55%  { opacity: 0.72; transform: scale(0.82); }
+  100% { opacity: 1;    transform: scale(1); }
 }
 
-/* 长按进度圈：按住时缓慢扩张，与 holdGlow 同步（1.5s 完成） */
+/* 长按进度圈：外圈缓慢扩张，与 sealGather 同步（1.5s 完成） */
 .return-orb::after {
   content: '';
   position: absolute;
@@ -1673,7 +1658,9 @@ body.no-3d .card-hit img { visibility: visible; }
   .return-orb::after { animation: none; }
   .ai-ripple.is-on { animation: none; }
   .ring-wave { animation: none !important; }
-  .return-orb.is-on .return-orb-core { animation: none; opacity: 1; }
+  /* 减弱动效：Seal 静态呈现为微亮空心（仍有视觉提示，但不再呼吸/涟漪） */
+  .return-orb.is-on .return-orb-core { animation: none; opacity: 0.22; transform: scale(0.5); }
+  .return-orb.is-on { transform: none; }
   .opening-ring.is-pulsing { animation: none; }
   .ai-card.is-loading { animation: none; border-color: var(--gold-dim); }
   .ai-caret { animation: none; }
