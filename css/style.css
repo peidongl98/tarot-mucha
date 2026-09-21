@@ -39,8 +39,8 @@
   --y-ask-top: 52%;          /* 旧变量：聚簇已改底边锚定 */
   --y-ask-bottom: 12%;       /* 提问聚簇底边距屏底（问句/输入框/光圈/提示整体锚定处） */
   --ring-size: 78px;
-  --orb-size: 20px;        /* 直径 13 → 20px（+54%），点击区域同步放大 */
-  --orb-gap: 17px;
+  --orb-size: 32px;        /* 批次 D1：20 → 32px（+60%）；点击容差 padding:4px 同比跟随 */
+  --orb-gap: 34px;         /* 批次 D2：17 → 34px，与放大后的球径保持视觉平衡 */
 
   /* 抽牌 / 看牌 / 解读各段落位 */
   --y-read: 64%;          /* 牌义文字块顶部（放大牌在其上方） */
@@ -311,13 +311,16 @@ body.input-focused .opening-hint {
 
 /* ---------- 0. 顶部光球展示（0 个则不显示；少则居中；多则横向滚动） ---------- */
 .opening-orbs {
-  position: absolute;
+  position: absolute;             /* 同时充当内部 .orb-star-ring 的定位包含块，D3 无需额外声明 */
   top: calc(var(--y-orbs) - 30px);   /* 上移补偿内边距，使光球视觉中线回到原落位 */
   left: 0;
   right: 0;
   max-width: 92vw;
   margin: 0 auto;
   box-sizing: border-box;
+  /* 批次 D3：星空环 ①②③ 必须铺满容器宽度 —— 容器自身已是 absolute 定位元素，
+   * 天然就是绝对定位子元素的包含块，无需再补 position: relative。
+   * 环作为容器第一个子元素（绝对定位，脱离文档流，不参与 flex 排布、不影响 gap 与居中）。 */
   display: flex;
   align-items: center;
   justify-content: safe center;   /* 超出宽度时左对齐可滚动，不裁掉左侧 */
@@ -332,6 +335,44 @@ body.input-focused .opening-hint {
   -ms-overflow-style: none;
   touch-action: pan-x;        /* 只允许横向滚动容器本身；纵向/斜向拖拽交给长按删除手势 */
 }
+
+/* ---------- 批次 D3：星空环（替代原来的虚线穹顶） ----------
+ * 设计要点：
+ *  - 连续细线（不是虚线）：用一条 <path> 画弧，**绝不使用 stroke-dasharray 做稀疏化** ——
+ *    星点由独立的 <circle> 承担，线与点是两种元素，视觉上才是「一条星环」而非边框。
+ *  - 淡金、低饱和、柔和微光：stroke 取 --gold-dim 量级，配一层很弱的 drop-shadow。
+ *  - 尺寸随容器 100% 宽（手机 ≈ 92vw，与屏幕同宽量级），高度固定为自身高度。
+ *  - 贴在光球底部（bottom 靠上一点），像托盘一样从下方托住三个球。
+ *  - 纯装饰：pointer-events:none，不参与命中，也不影响长按删除手势。 */
+.orb-star-ring {
+  position: absolute;
+  left: 50%;
+  bottom: calc(32px - var(--orb-size) * 0.62);   /* 弧顶刚好落在光球底缘附近 */
+  width: 100%;
+  height: calc(var(--orb-size) * 1.15);
+  transform: translateX(-50%);
+  pointer-events: none;
+  overflow: visible;
+  opacity: 0;
+  transition: opacity 0.7s ease;
+}
+/* 与光球同步显隐：只有首页且光球可见时才亮起 */
+.opening-orbs:not(.is-hidden) .orb-star-ring { opacity: 1; }
+.opening-orbs.is-dim .orb-star-ring { opacity: 0.45; }
+.orb-star-ring svg { width: 100%; height: 100%; overflow: visible; display: block; }
+.orb-star-line {
+  fill: none;
+  stroke: rgba(201, 169, 97, 0.38);
+  stroke-width: 1;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(201, 169, 97, 0.28));
+}
+.orb-star-dot {
+  fill: rgba(233, 214, 168, 0.62);
+  filter: drop-shadow(0 0 3px rgba(201, 169, 97, 0.45));
+}
+/* 少数几颗稍亮的星点，避免均匀带来的机械感 */
+.orb-star-dot.is-bright { fill: rgba(255, 250, 238, 0.85); }
 /* 长按删除激活后：禁止浏览器接管任何手势，确保 pointermove 连续到达 */
 body.orb-deleting .opening-orbs { touch-action: none; }
 .orb.is-del-flash, .orb.is-del-drag { touch-action: none; }
@@ -1742,8 +1783,8 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-title: 14%;
     --y-ask-bottom: 10%;
     --ring-size: 70px;
-    --orb-size: 18px;
-    --orb-gap: 15px;
+    --orb-size: 28px;        /* 批次 D1：18 → 28px（+56%） */
+    --orb-gap: 30px;         /* 批次 D2 */
     --y-read: 62%;
     --y-ai-ring: 28.5%;
     --y-ai-title: 38.5%;
@@ -1765,6 +1806,8 @@ body.no-3d .card-hit img { visibility: visible; }
     --y-title: 12.5%;
     --y-ask-bottom: 8%;
     --ring-size: 64px;
+    --orb-size: 28px;        /* 批次 D1：矮屏也保持 +56%，与手机一致 */
+    --orb-gap: 28px;         /* 批次 D2 */
     --y-read: 60%;
     --y-ai-ring: 27%;
     --y-ai-title: 36%;

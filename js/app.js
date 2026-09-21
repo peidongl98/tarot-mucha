@@ -466,7 +466,8 @@ function renderOrbs(list, opts) {
     });
   }
 
-  el.orbRow.textContent = '';
+  /* 批次 D3：清空时只摘光球，保留星空环节点（环是第一个子元素，重建代价高且没必要） */
+  Array.prototype.forEach.call(el.orbRow.querySelectorAll('.orb'), (n) => n.remove());
   const nodes = items.map((rec, i) => {
     const orb = elNew('span', 'orb' + (items.length > 1 && i === 0 ? ' is-aging' : ''));
     orb.dataset.at = String(rec.at);
@@ -484,6 +485,17 @@ function renderOrbs(list, opts) {
 
   const gsap = window.gsap;
 
+  /* 批次 D4：回首页时整个光球行从下方飘上来（柔和缓动）。
+   * 与「新球挤入 / 旧球被挤动」的逐球动画叠加：容器做整体飘升，单球做横向挤动，
+   * 两者作用在不同元素上（容器 vs .orb），互不覆盖 transform。 */
+  if (o.riseUp && gsap && !REDUCED && items.length) {
+    el.orbRow.dataset.rising = '1';   // 告知 setOrbsVisible 别硬置 opacity
+    gsap.fromTo(el.orbRow, { opacity: 0, y: 26 }, {
+      opacity: 1, y: 0, duration: 1.1, ease: 'power3.out', delay: 0.25,
+      onComplete: () => { delete el.orbRow.dataset.rising; },
+    });
+  }
+
   if (o.animateNew && gsap && !REDUCED) {
     nodes.forEach((n) => {
       const before = prev.get(n.dataset.at);
@@ -499,12 +511,60 @@ function renderOrbs(list, opts) {
     });
   } else if (items.length) {
     if (gsap && !REDUCED && o.fadeIn !== false) {
-      gsap.fromTo(el.orbRow, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 1.0, ease: 'power3.out', delay: 0.3 });
+      /* 批次 D4：从下方飘上来（y: 26 → 0，柔和缓动），不再从上方落下。
+       * riseUp 已播出同样的动画时不重复播，避免两次 fromTo 打架。 */
+      if (!o.riseUp) {
+        gsap.fromTo(el.orbRow, { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 1.1, ease: 'power3.out', delay: 0.25 });
+      }
     } else {
       el.orbRow.style.opacity = '1';
     }
   }
+  buildStarRing();
   return nodes;
+}
+
+/* ---------- 批次 D3：星空环绘制 ----------
+ * 按容器实际宽度生成「连续细线 + 均匀小圆点」：
+ *  - 线走一条弧（顶点在上、两端略下垂），不用 stroke-dasharray，避免虚线感；
+ *  - 点沿同一条弧按等参数步长均匀铺开 —— 等参数步长在整个屏幕宽度均匀，
+ *    天然左右对称（左右镜像点参数和为 1，公式对 a 与 1-a 完全对称）。
+ * 只在数量 / 宽度变化时重绘，避免每次 renderOrbs 都重建 DOM。 */
+let starRingKey = '';
+function buildStarRing() {
+  const host = el.orbStarRing || document.getElementById('orbStarRing');
+  if (!host) return;
+  const w = Math.round(host.clientWidth);
+  if (!w) return;
+  const count = el.orbRow ? Number(el.orbRow.dataset.count || 0) : 0;
+  const key = w + ':' + count;
+  if (key === starRingKey) return;
+  starRingKey = key;
+
+  const H = 100;                     // viewBox 高
+  const sag = H * 0.30;              // 两端相对弧顶的下垂量
+  const px = (a) => 2 * a * (1 - a); // 0(端点) → 1(中点) 的平滑权重，左右对称
+  const py = (a) => 4 + sag * px(a); // 弧顶贴顶，中段略往下鼓
+
+  const steps = 32;
+  let d = '';
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    d += (i ? ' L ' : 'M ') + (t * w).toFixed(1) + ' ' + py(t).toFixed(1);
+  }
+
+  const gap = Math.max(16, Math.round(w / 46));   // 星点间距：宽屏更疏，窄屏仍有密度
+  const n = Math.max(5, Math.floor(w / gap));
+  let dots = '';
+  for (let i = 0; i <= n; i++) {
+    const a = i / n;
+    const r = (i % 7 === 3) ? 1.5 : 1.0;          // 每 7 颗挑一颗稍大，破机械感
+    const cls = (i % 7 === 3) ? 'orb-star-dot is-bright' : 'orb-star-dot';
+    dots += '<circle class="' + cls + '" cx="' + (a * w).toFixed(1) + '" cy="' + py(a).toFixed(1) + '" r="' + r + '"/>';
+  }
+
+  host.innerHTML = '<svg viewBox="0 0 ' + w + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
+    + '<path class="orb-star-line" d="' + d + '"/>' + dots + '</svg>';
 }
 
 /* 剩余光球变黯淡 + 缓慢漂浮（抽牌时） */
@@ -518,10 +578,14 @@ function dimOrbs(on) {
 function setOrbsVisible(on) {
   if (!el.orbRow) return;
   if (on) {
-    if (el.orbRow.childElementCount === 0) { el.orbRow.hidden = true; return; }
+    /* 批次 D3：容器里还有星空环这个装饰子节点，childElementCount 不再等于光球数，
+     * 必须按 .orb 数量判断，否则 0 条记录时容器不会被隐藏。 */
+    if (!el.orbRow.querySelector('.orb')) { el.orbRow.hidden = true; return; }
     el.orbRow.hidden = false;
     el.orbRow.classList.remove('is-dim', 'is-hidden');
-    el.orbRow.style.opacity = '1';
+    /* 批次 D4：入场时 opacity 已交给 GSAP 承担（0 → 1），这里不再硬置 1，
+     * 否则会立刻覆盖动画起始值，淡入效果丢失。非入场路径仍直接置 1 保证可见。 */
+    if (!(window.gsap && el.orbRow.dataset.rising === '1')) el.orbRow.style.opacity = '1';
   } else {
     el.orbRow.classList.remove('is-dim');
     el.orbRow.classList.add('is-hidden');
@@ -1725,8 +1789,11 @@ async function resetOpening(opts) {
   openingOpened = false;
   if (scene && scene.ok) await scene.openingShowDeck();
 
-  // 光球队列：新光球从右侧挤入，已有光球被挤动
-  renderOrbs(records, { animateNew: !!o.animateNew, fadeIn: false });
+  /* 批次 D4：回首页时光球整体从下方飘上来。
+   * fadeIn 原本传 false（瞬时出现），这里改为 true 让 renderOrbs 走入场分支
+   * （y: 26 → 0，power3.out，1.1s）；animateNew 时走各自的 FLIP / 挤入分支，
+   * 容器飘升由 riseUp 单独驱动，两条路径都能看到光球从下方浮起。 */
+  renderOrbs(records, { animateNew: !!o.animateNew, fadeIn: true, riseUp: true });
   setOrbsVisible(true);            // 回到首页：光球重新出现
 
   state = S.OPENING;
@@ -2155,6 +2222,7 @@ function onViewportChange() {
   syncKeyboard();
   /* 画布尺寸由 syncCanvas 自己判据（宽度变 / 高度变大才动），不依赖焦点时序。 */
   syncCanvas();
+  buildStarRing();   // 批次 D3：宽度变化（旋转 / 键盘收起）后按新宽度重绘星空环
 }
 
 function setupViewport() {
@@ -2226,6 +2294,7 @@ function cacheDom() {
   el.opening = document.getElementById('opening');
   el.orbRow = document.getElementById('orbRow');
   el.orbDeleteArc = document.getElementById('orbDeleteArc');
+  el.orbStarRing = document.getElementById('orbStarRing');
   orbFxLoop();              /* 首页光球呼吸涟漪 & 删除弧提示（仅 OPENING 态随机触发） */
   el.openingTitle = document.getElementById('openingTitle');
   el.openingQuestion = document.getElementById('openingQuestion');
