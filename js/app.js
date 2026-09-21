@@ -1293,27 +1293,37 @@ function enterReading() {
   updateHits();
 }
 
-/* ---------- Seal 光球的出现时机（问题 3.3） ----------
+/* ---------- Seal 区块的出现时机（问题 3.3 / 批次 C）
  * 规则：只有用户把解读区滚到底部才让它出现。
  *   · 内容可滚动 → 靠 scroll 监听「已到底」触发
  *   · 内容不足以滚动 → 文字展示完成后延迟 1s 出现
  * 用 token 做代际隔离：离开解读 / 重新进入会把旧的一次性触发作废，
- * 不需要在别处再写清理逻辑（避免条件嵌套）。 */
+ * 不需要在别处再写清理逻辑（避免条件嵌套）。
+ *
+ * 批次 C4：显隐统一挂在容器 .seal-zone 上（文字 + 光球同一个父元素），
+ * 不再往 .return-orb 上加 is-on —— 那里只留长按态 is-holding / is-sealed。 */
 let sealToken = 0;
 
+function sealZone() { return el.sealZone || document.getElementById('sealZone'); }
+
 function revealSeal() {
-  if (state !== S.READING || !el.returnOrb) return;
-  el.returnOrb.classList.add('is-on');
+  if (state !== S.READING) return;
+  const z = sealZone();
+  if (z) z.classList.add('is-on');
 }
 
 function armSealReveal() {
   sealToken++;
-  if (!el.returnOrb) return;
-  el.returnOrb.classList.remove('is-on', 'is-holding', 'is-sealed');
+  const z = sealZone();
+  if (!z) return;
+  z.classList.remove('is-on', 'is-holding', 'is-sealed', 'is-flying');
+  if (el.returnOrb) el.returnOrb.classList.remove('is-holding', 'is-sealed', 'is-flying');
 }
 
-/* 内容不足以滚动时：以「文字浮现动画结束」为起点再等 1s（问题 3.3 原文口径）。
- * 文字整体上浮 1.25s → 这里 1400ms 后判定不可滚动，再等 1000ms 浮出。 */
+/* 内容不足以滚动时：以「文字展示完成」为起点再等 1s（问题 3.3 原文口径）。
+ * 文字整体上浮 1.25s → 这里 1000ms 后判定不可滚动，浮出 Seal。
+ * ⚠️ AI 失败 / 超时（showAiError）也必须走这里 —— 否则解读区没有 Seal，
+ *    用户既看不到解读也回不去，等于软锁死。 */
 function armSealFallback() {
   const token = sealToken;
   window.setTimeout(() => {
@@ -1326,8 +1336,9 @@ function armSealFallback() {
 
 /* 解读区滚动：到底即放 Seal 出来（无条件嵌套，单层判断） */
 function onAiScroll() {
-  if (state !== S.READING || !el.returnOrb) return;
-  if (el.returnOrb.classList.contains('is-on')) return;
+  if (state !== S.READING) return;
+  const z = sealZone();
+  if (!z || z.classList.contains('is-on')) return;
   const box = el.aiText;
   if (!box) return;
   if (box.scrollHeight <= box.clientHeight + 2) return;   // 不可滚动的交给延迟兜底
@@ -1341,7 +1352,7 @@ function exitReading() {
   if (scene && scene.ok) scene.setView('row');
   el.readingView.classList.remove('is-on');
   sealToken++;                                   // 作废这一次的「延迟兜底」触发
-  el.returnOrb.classList.remove('is-on', 'is-holding', 'is-sealed');
+  armSealReveal();
   if (cardsFlipped.every(Boolean)) showSink(true);
   updateHits();
 }
@@ -1489,6 +1500,7 @@ function showAiError(msg) {
   el.aiText.appendChild(elNew('p', 'ai-error', msg));
   el.aiText.classList.add('is-on');
   setAiRingVisible(true);   // 出错时光圈留在原地，作为重试入口
+  armSealFallback();        // 出错也要能浮出 Seal，否则用户回不去（软锁死）
 }
 
 async function askAi() {
@@ -1572,11 +1584,15 @@ function startHold(e) {
   if (state !== S.READING || holdTimer) return;
   try { el.returnOrb.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
   el.returnOrb.classList.add('is-holding');
+  /* 批次 C4：停止容器呼吸，并把容器固定在最亮，让聚集动画独占观感 */
+  const z = sealZone();
+  if (z) z.classList.add('is-holding');
   holdTimer = window.setTimeout(() => {
     holdTimer = null;
     /* 满格：光已聚实（.is-holding 的 sealGather 走完）→ 切到封存态。
      * 两者同时挂在元素上，后一条动画接管，不会叠加播放。 */
     el.returnOrb.classList.add('is-sealed');
+    if (z) z.classList.add('is-sealed');
     /* 触觉反馈：长按完成瞬间轻微震动（不支持则静默跳过） */
     try { if (navigator.vibrate) navigator.vibrate(18); } catch (err) { /* 忽略 */ }
     finishAndReturn();
@@ -1588,6 +1604,8 @@ function cancelHold() {
   /* 松手太早：撤掉 is-holding，sealGather 立即停播 → 光退回空心呼吸态。
    * 不动 is-sealed（那只在满格时加），所以「按满后松手」不会被打回空心。 */
   if (el.returnOrb) el.returnOrb.classList.remove('is-holding');
+  const z = sealZone();
+  if (z) z.classList.remove('is-holding');
 }
 
 async function finishAndReturn() {
@@ -1595,6 +1613,7 @@ async function finishAndReturn() {
   state = S.ENDING;
 
   const gsap = window.gsap;
+  const sz2 = sealZone();
   const orbRect = el.returnOrb.getBoundingClientRect();
   const orbCenter = { x: orbRect.left + orbRect.width / 2, y: orbRect.top + orbRect.height / 2 };
 
@@ -1627,6 +1646,7 @@ async function finishAndReturn() {
   if (gsap && !REDUCED) {
     const r2 = el.returnOrb.getBoundingClientRect();
     el.returnOrb.classList.add('is-flying');
+    if (sz2) sz2.classList.add('is-flying');   // 停掉容器呼吸，避免与飞行 transform 叠加
     await new Promise((res) => {
       gsap.timeline({ onComplete: res })
         .to(el.returnOrb, {
@@ -1639,7 +1659,8 @@ async function finishAndReturn() {
         .to(el.returnOrb, { opacity: 0, duration: 0.45, ease: 'power2.out' });
     });
   }
-  el.returnOrb.classList.remove('is-flying', 'is-on');
+  if (sz2) sz2.classList.remove('is-flying');
+  el.returnOrb.classList.remove('is-flying');
   el.returnOrb.style.cssText = '';
   el.aiText.style.opacity = '';
   el.aiRing.style.opacity = '';
@@ -1672,7 +1693,10 @@ async function resetOpening(opts) {
   setAiRingVisible(true);
   setAiThinking(false);
   el.readingView.classList.remove('is-on');
-  el.returnOrb.classList.remove('is-on');
+  /* 批次 C4：Seal 的显隐在容器上，这里统一收回，避免残留到开场 */
+  const sz = sealZone();
+  if (sz) sz.classList.remove('is-on', 'is-holding', 'is-sealed', 'is-flying');
+  el.returnOrb.classList.remove('is-holding', 'is-sealed', 'is-flying');
   hideMeaning();
   showSink(false);
   if (el.wheelLabel) el.wheelLabel.classList.remove('is-on');
@@ -2228,6 +2252,7 @@ function cacheDom() {
   el.readingView = document.getElementById('readingView');
   el.aiRing = document.getElementById('aiRing');
   el.aiText = document.getElementById('aiText');
+  el.sealZone = document.getElementById('sealZone');
   el.returnOrb = document.getElementById('returnOrb');
 }
 

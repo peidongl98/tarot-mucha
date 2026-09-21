@@ -1563,17 +1563,78 @@ body.no-3d .card-hit img { visibility: visible; }
   100% { transform: scale(6.4); opacity: 0; }
 }
 
-/* 返回光球（Seal）：问题 3 重做
- *   外观 = 空心圆 + 三层涟漪 + 缓慢呼吸，与开场/提问页光圈同一套语言
- *   长按 = 光从四周向圆心聚集（空心 → 实心），满格触发封存
- *   出现 = 不提前出现，由 .is-on 控制（app.js 在「滚到解读底部」时才加） */
-.return-orb {
+/* 返回光球（Seal）：问题 3 重做 + 批次 C4 改容器化
+ *   结构 = .seal-zone（容器：定位 / 显隐 / 浮入 / 呼吸 / 淡出）
+ *          ├─ .seal-label  「Hold to seal」标识
+ *          └─ .return-orb  空心圆 + 三层涟漪 + 长按聚集成实心
+ *   为什么合并成容器：文字与光球原本是两个兄弟元素，各有各的 opacity/transition，
+ *   结果呼吸频率对不上、浮入先后不一致。收进一个容器后二者共用同一套时序，
+ *   同步是结构决定的，不需要再用 JS 去对齐两边。 */
+
+/* ---------- Seal 容器：唯一的显隐/动画入口 ---------- */
+.seal-zone {
   position: absolute;
   left: 50%;
   bottom: 9%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  /* 出现方式：从底部浮上来（问题 3.3 / 批次 D4 同款缓动）—— 只动 transform + opacity */
+  transform: translate(-50%, 18px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.seal-zone.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  /* 容器承接指针，光球单独放开（容器本身不吃事件，避免挡住上方滚动区） */
+  pointer-events: none;
+}
+
+/* ⚠️ 光球可点必须挂在 .is-on 上。
+ * 只写 `.return-orb { pointer-events: auto }` 会留一个隐形命中区：
+ * 容器 opacity:0 但仍占位，光球照旧吃点击 —— 实测它会盖住下方的 Sink 光圈，
+ * 导致「三张牌全翻开后点 Sink 没反应」。 */
+.seal-zone.is-on .return-orb { pointer-events: auto; }
+
+/* 同步呼吸：文字与光球一起缓慢明灭（挂在容器上 → 二者天然同相）。
+ * 只动 opacity，合成器友好。 */
+.seal-zone.is-on { animation: sealBreatheZone 4.2s ease-in-out infinite; }
+
+@keyframes sealBreatheZone {
+  0%, 100% { opacity: 0.72; }
+  50%      { opacity: 1; }
+}
+
+/* 长按中 / 封存中：停掉容器呼吸，让聚集与封存动画独占观感 */
+.seal-zone.is-holding,
+.seal-zone.is-sealed { animation: none; opacity: 1; }
+
+/* ---------- 标识文字 ---------- */
+.seal-label {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---------- 光球本体：不再是绝对定位的独立层，而是容器的 flex 项 ---------- */
+.return-orb {
+  position: relative;
+  flex: none;
   width: 44px;
   height: 44px;
-  margin: 0 0 0 -22px;
+  margin: 0;
   padding: 0;
   background: none;
   border: 1px solid rgba(201, 169, 97, 0.30);   /* 空心圆：与 .opening-ring 同款细边 */
@@ -1582,29 +1643,20 @@ body.no-3d .card-hit img { visibility: visible; }
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;      /* 长按不弹系统菜单 */
   user-select: none;
-  opacity: 0;
-  pointer-events: none;
+  pointer-events: none;             /* 默认可点性关闭；由 .seal-zone.is-on 打开 */
   box-shadow: inset 0 0 16px rgba(201, 169, 97, 0.06);
-  /* 出现方式：从底部浮上来（问题 3.3）—— 只动 transform + opacity，纯合成属性 */
-  transform: translateY(18px);
-  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.return-orb.is-on {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0);
-}
-
-/* 涟漪：与开场光圈完全一致的三层扩散，仅在 .is-on 之后跑 */
-.return-orb.is-on .ring-wave {
+/* 涟漪：与开场光圈完全一致的三层扩散，仅在容器 .is-on 之后跑
+ * （批次 C4：显隐统一挂在 .seal-zone 上，光球自己不再持有 is-on） */
+.seal-zone.is-on .ring-wave {
   animation: ringWave 4.6s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
 }
-.return-orb.is-on .ring-wave:nth-child(2) { animation-delay: 1.5s; }
-.return-orb.is-on .ring-wave:nth-child(3) { animation-delay: 3.0s; }
+.seal-zone.is-on .ring-wave:nth-child(2) { animation-delay: 1.5s; }
+.seal-zone.is-on .ring-wave:nth-child(3) { animation-delay: 3.0s; }
 
 /* 长按聚集：核心圆从「完全透明」逐渐聚成「实心亮圆」。
- * 直接动 background-size + opacity（不引入 scale，避免与容器 transform 打架）；
+ * 直接动 opacity + scale（container 的呼吸已停，不会打架）；
  * 用 1.5s linear 与 JS 的 HOLD_MS 严格同步。 */
 .return-orb-core {
   position: absolute;
@@ -1621,8 +1673,10 @@ body.no-3d .card-hit img { visibility: visible; }
   will-change: transform, opacity;
 }
 
-/* 缓慢呼吸：空心 → 微亮 → 空心，暗示「可长按」。只动 opacity（合成器友好）。 */
-.return-orb.is-on .return-orb-core {
+/* 缓慢呼吸（空心 → 微亮 → 空心，暗示「可长按」）。
+ * 只动 opacity + 轻微 scale，且幅度压得很小 —— 容器的呼吸已承担整体明灭，
+ * 这里是圆心自己的吐息，两者叠加就是「文字与光球同步呼吸」的观感。 */
+.seal-zone.is-on .return-orb-core {
   animation: sealBreathe 4.2s ease-in-out infinite;
 }
 
@@ -1672,29 +1726,11 @@ body.no-3d .card-hit img { visibility: visible; }
   transition: transform 0.14s ease, opacity 0.14s ease;
 }
 
-/* Seal 标识：光球上方（仅标识用途，不加 hold 提示文字，靠动效引导） */
-.seal-label {
-  position: absolute;
-  left: 50%;
-  bottom: calc(9% + 58px);
-  transform: translateX(-50%);
-  margin: 0;
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 400;
-  font-size: 13px;
-  letter-spacing: 0.42em;
-  text-indent: 0.42em;
-  color: var(--muted);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.9s ease 0.25s;
-}
-
-.reading-view.is-on .seal-label { opacity: 0.85; }
-
-/* 返回光球飞向顶部时用（GSAP 只动 transform，这里保证层级） */
-.return-orb.is-flying { position: fixed; z-index: 9; bottom: auto; top: 0; transition: none; }
+/* 返回光球飞向顶部时用（GSAP 只动 transform；这里抬层级并脱离容器、
+ * 改成 fixed 才能以视口为参照飞到屏幕顶）。容器 .seal-zone 的呼吸同时停掉，
+ * 避免与飞行 transform 叠加（见下方 .seal-zone.is-flying）。 */
+.return-orb.is-flying { position: fixed; z-index: 9; transition: none; }
+.seal-zone.is-flying { animation: none; opacity: 1; }
 /* ============================================================
    响应式
    ============================================================ */
@@ -1755,8 +1791,8 @@ body.no-3d .card-hit img { visibility: visible; }
   .ai-ripple.is-on { animation: none; }
   .ring-wave { animation: none !important; }
   /* 减弱动效：Seal 静态呈现为微亮空心（仍有视觉提示，但不再呼吸/涟漪） */
-  .return-orb.is-on .return-orb-core { animation: none; opacity: 0.22; transform: scale(0.5); }
-  .return-orb.is-on { transform: none; }
+  .seal-zone.is-on { animation: none; opacity: 1; }
+  .seal-zone.is-on .return-orb-core { animation: none; opacity: 0.22; transform: scale(0.5); }
   .opening-ring.is-pulsing { animation: none; }
   .ai-card.is-loading { animation: none; border-color: var(--gold-dim); }
   .ai-caret { animation: none; }

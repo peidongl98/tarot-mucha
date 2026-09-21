@@ -112,15 +112,20 @@
     <path class="rs rs-d" d="M2,100 C44,84 86,112 132,96 C170,82 208,104 238,92" />
   </svg>
   <div class="ai-text" id="aiText" aria-live="polite"></div>
-  <p class="seal-label" aria-hidden="true">Seal</p>
-  <!-- Seal 光球（问题 3 重做）：空心圆 + 三层涟漪 + 长按聚集成实心。
-       结构与开场/提问页光圈一致（.ring-wave × 3 做涟漪），长按由 .is-holding 驱动。 -->
-  <button id="returnOrb" class="return-orb" type="button" aria-label="Hold to seal and return">
-    <span class="ring-wave"></span>
-    <span class="ring-wave"></span>
-    <span class="ring-wave"></span>
-    <span class="return-orb-core"></span>
-  </button>
+  <!-- Seal 区块（批次 C4）：标识文字 + 光球放进同一个容器，显隐 / 定位 / 动画
+       全部由容器统一控制 —— 这样文字与光球天然同步（含呼吸、浮入、淡出），
+       不会出现「文字已淡去、光球还在呼吸」这类两套时序打架的情况。 -->
+  <div class="seal-zone" id="sealZone" aria-hidden="true">
+    <p class="seal-label">Hold to seal</p>
+    <!-- Seal 光球：空心圆 + 三层涟漪 + 长按聚集成实心。
+         结构与开场/提问页光圈一致（.ring-wave × 3 做涟漪），长按由 .is-holding 驱动。 -->
+    <button id="returnOrb" class="return-orb" type="button" aria-label="Hold to seal and return">
+      <span class="ring-wave"></span>
+      <span class="ring-wave"></span>
+      <span class="ring-wave"></span>
+      <span class="return-orb-core"></span>
+    </button>
+  </div>
 </section>
 
 <!-- ===== 开场 ===== -->
