@@ -106,19 +106,17 @@ body:not(.has-draw) .site-footer { display: none; }
 /* ============================================================
    Layer 0：WebGL 画布
    ============================================================ */
+/* 结构解耦（问题 1）：把 100lvh 直接下到 <canvas>，wrapper 不再持有任何视口单位。
+ * 原因：Safari 会对「wrapper 用 lvh + canvas 用 %」这条解析链重算容器高
+ * （iOS 会在 UI 收放 / 键盘弹出时重新求值 wrapper 的 lvh），一旦重算，
+ * canvas 的 % 高度随之变化 → render buffer 未重设 → 画面被拉伸变形。
+ * 现在 canvas 自己吃 lvh（键盘与地址栏都不会让它缩小），wrapper 只是定位外壳。 */
 .gl-layer {
   position: fixed;
   left: 0;
   right: 0;
   top: 0;
-  /* 画布高度用 100lvh（大视口高 = 所有 UI 都收起时的最大高），不用 --vph。
-   * 原因：--vph 是 svh（小视口高），iOS Safari / 微信 X5 在软键盘弹出时会把
-   * svh 缩减，画布的 CSS 尺寸随之变化、而 render buffer 未重设 →
-   * 画面被拉伸，表现为「扇形牌被键盘挤压变形」。
-   * lvh 取的是"UI 全收起"的最大值，键盘与地址栏都不会让它缩小 → 画布尺寸恒定，
-   * 相机宽高比恒定 → 扇形位置/大小/浮动节奏完全不受键盘影响。
-   * html{overflow:hidden} 已裁掉溢出，多出的部分不会产生滚动条。 */
-  height: 100lvh;
+  height: 100lvh;                        /* 定位外壳兜底，与 canvas 同源 */
   z-index: 0;
   pointer-events: none;
   transition: filter 0.45s ease;
@@ -126,8 +124,12 @@ body:not(.has-draw) .site-footer { display: none; }
 
 .gl-layer canvas {
   display: block;
-  width: 100%;
-  height: 100%;
+  position: absolute;                    /* 脱离 wrapper 的盒模型，不吃 % 解析链 */
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100lvh;                        /* ← 画布自身的固定尺寸，与视口事件完全解耦 */
+  max-height: none;
 }
 
 /* 四角压暗，让中央的牌与文字更聚焦 */
@@ -1556,6 +1558,7 @@ body.no-3d .card-hit img { visibility: visible; }
   border-radius: 50%;
   opacity: 0;
   transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
 .return-orb.is-holding::after {
@@ -1567,6 +1570,35 @@ body.no-3d .card-hit img { visibility: visible; }
   0%   { transform: scale(1); opacity: 0.85; }
   100% { transform: scale(1.75); opacity: 0.1; }
 }
+
+/* 满格瞬间：一次短促的收紧脉冲，作为「封存」的视觉起点 */
+.return-orb.is-sealed .return-orb-core {
+  animation: none;
+  opacity: 1;
+  transform: scale(1.12);
+  transition: transform 0.14s ease, opacity 0.14s ease;
+}
+
+/* Seal 标识：光球上方（仅标识用途，不加 hold 提示文字，靠动效引导） */
+.seal-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(9% + 58px);
+  transform: translateX(-50%);
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.9s ease 0.25s;
+}
+
+.reading-view.is-on .seal-label { opacity: 0.85; }
 
 /* 返回光球飞向顶部时用（GSAP 只动 transform，这里保证层级） */
 .return-orb.is-flying { position: fixed; z-index: 9; bottom: auto; top: 0; transition: none; }

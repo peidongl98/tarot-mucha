@@ -1945,7 +1945,9 @@ function syncKeyboard() {
   try { window.scrollTo(0, 0); } catch (e) { /* 忽略 */ }
 }
 
-/* 画布尺寸：只在窗口宽高真变了时才重排（键盘弹出不动画布） */
+/* 画布尺寸：只在窗口宽高真变了时才重排（键盘弹出不动画布）。
+ * 结构解耦后这里不含任何「键盘态判断」—— 判据只有一条：画布盒尺寸是否真的变了。
+ * scene.layout() 自身也做了幂等（尺寸未变直接 return），两条保险互不依赖。 */
 let lastW = 0;
 let lastH = 0;
 function syncCanvas() {
@@ -1959,9 +1961,9 @@ function syncCanvas() {
 
 function onViewportChange() {
   syncKeyboard();
-  /* 输入框不在焦点上时窗口变化一定是地址栏/旋转，不是键盘 → 同步画布。
-   * 键盘弹出（有焦点）时画布保持不动，避免牌被挤压。 */
-  if (!focusOn) syncCanvas();
+  /* 不再用 focusOn 做判断（那是"用 JS 挡"，时序一交错就漏）。
+   * 直接让 syncCanvas 走幂等比对：真 resize（旋转/分屏）才重排。 */
+  syncCanvas();
 }
 
 function setupViewport() {

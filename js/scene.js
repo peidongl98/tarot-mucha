@@ -605,10 +605,21 @@ export function createTarotScene(container) {
     return api;
   }
 
-  const size = () => ({
-    w: container.clientWidth || window.innerWidth,
-    h: container.clientHeight || window.innerHeight,
-  });
+  /* 画布尺寸：不再读 container.clientHeight（问题 1 的结构性修复）。
+   * clientHeight 是 wrapper 的布局盒高，Safari 在键盘弹出 / UI 收放时会重新求值它，
+   * 一旦变小 → camera.aspect 变化 → 扇形牌被重排 + 画面被拉伸。
+   * 现在改成「读 canvas 自己的 offsetHeight」：canvas 由 CSS 固定为 100lvh/100vw，
+   * 键盘与地址栏都不会让它缩小 → 这个尺寸天然稳定。
+   * 兜底仍保留 innerWidth/innerHeight，防 canvas 尚未挂载的首次布局。 */
+  let sizeCache = { w: 0, h: 0 };
+  const size = () => {
+    const cv = renderer && renderer.domElement;
+    const w = (cv && cv.offsetWidth) || container.clientWidth || window.innerWidth;
+    const h = (cv && cv.offsetHeight) || container.clientHeight || window.innerHeight;
+    /* 缓存同一个对象：上层多处解构使用，避免每次调用产生新对象 */
+    if (w !== sizeCache.w || h !== sizeCache.h) sizeCache = { w, h };
+    return sizeCache;
+  };
 
   scene = new THREE.Scene();
   if (CONFIG.enableFog) scene.fog = new THREE.FogExp2(COLOR_INK, 0.02);
@@ -718,8 +729,20 @@ export function createTarotScene(container) {
     ];
   }
 
+  /* 已应用的布局尺寸：layout() 幂等化的依据（问题 1）。
+   * 尺寸没变就整条跳过 —— 键盘弹出 / 地址栏伸缩 / vv.resize 都会反复触发重排，
+   * 以前每次都会重算 slots + 复位扇形牌，是「扇形牌被键盘挤压」的直接来源。
+   * 幂等之后，这类事件天然无害，不需要再用 JS 条件去挡。 */
+  let appliedW = 0;
+  let appliedH = 0;
+
   function layout() {
     const { w, h } = size();
+    /* 尺寸未变：直接返回，绝不重排（相机矩阵与 render buffer 都不需要动）。
+     * 5px 容差：真机偶发 1~2px 抖动不该触发整场重排。 */
+    if (Math.abs(w - appliedW) < 5 && Math.abs(h - appliedH) < 5 && appliedW) return;
+    appliedW = w;
+    appliedH = h;
     renderer.setPixelRatio(dpr);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
