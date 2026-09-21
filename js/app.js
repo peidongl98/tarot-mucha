@@ -1051,13 +1051,25 @@ function zoomIn(i) {
   state = S.ZOOM;
   zoomIndex = i;
   showSink(false);
-  if (scene && scene.ok) scene.zoomCard(i, true);
+  /* 问题 2 性能优化：把「3D 牌放大」与「DOM 牌名浮出」在时序上错开。
+   * 以前两者几乎同时开跑 —— 同一帧里既要推进 Three.js 的 Object3D 动画、
+   * 又要合成 DOM 浮层的 transform/opacity，移动端 GPU 只有一个合成线程，
+   * 叠加起来就是肉眼可见的掉帧。现在让牌名等 3D 放大**跑完 62%**
+   * （≈0.56s，此时缩放曲线已进入 power3.inOut 的减速段、视觉上已「到位」），
+   * 再开始浮出。视觉上更像「牌先落定、名字再浮上来」，同时避开峰值。 */
+  const ZOOM_OVERLAP = 0.56;
+  if (scene && scene.ok) {
+    const tl = scene.zoomCard(i, true);
+    if (tl && typeof tl.call === 'function') tl.call(() => initZoomFloat(i), null, ZOOM_OVERLAP);
+    else window.setTimeout(() => initZoomFloat(i), ZOOM_OVERLAP * 1000);
+  } else {
+    initZoomFloat(i);
+  }
   if (el.zoomLabel) {
     el.zoomLabel.textContent = POSITIONS[i];
     el.zoomLabel.classList.add('is-on');
   }
   showMeaning(i);
-  initZoomFloat(i);        // 已翻开的牌：class 已在 → 直接返回；翻面路径由 flipCard 回调补播
 }
 
 function zoomOut() {
@@ -1129,10 +1141,17 @@ function hideReadFloat() {
   const gsap = window.gsap;
   if (gsap) gsap.killTweensOf([f, f.children]);
   f.classList.remove('is-on', 'is-float');
-  if (gsap) gsap.set(f, { opacity: 0, y: 30, filter: 'blur(10px)' });
+  /* 收起态不用 blur（问题 2）：blur 会让元素长期挂着 filter 层。改纯 transform + opacity。 */
+  if (gsap) gsap.set(f, { opacity: 0, y: 30, scale: 0.92 });
   else f.style.opacity = '0';
+  f.style.willChange = 'auto';
 }
 
+/* 牌名浮层：浮出动画（问题 2 性能优化）
+ * ① 去掉 filter: blur() 动画 —— 实时模糊每帧都要重算卷积，是移动端最主要的掉帧源。
+ *    改用「scale + y + opacity」的纯合成属性，视觉上「从深处浮上来」的感觉保留
+ *    （起始 scale 0.84→0.80 略微加强，补偿去掉 blur 后纵深感的减弱）。
+ * ② 动之前打 will-change 把元素提到独立合成层，动完立刻摘掉（长期挂着会白占显存）。 */
 function revealReadFloat(i) {
   pendingNameFly = false;
   if (i !== zoomIndex) return;          // 牌已收回 / 已切到别张：不补播
@@ -1143,19 +1162,19 @@ function revealReadFloat(i) {
   if (!gsap || REDUCED) {
     f.classList.add('is-on', 'is-float');
     f.style.opacity = '1';
-    f.style.filter = 'none';
     return;
   }
 
-  /* 「像浮出水面」：从小、低、模糊的深处上浮到牌面正中，落定后才开始呼吸 */
+  /* 「像浮出水面」：从小、低的上浮到牌面正中，落定后才开始呼吸 */
   f.classList.add('is-on');
   f.style.visibility = 'visible';
-  gsap.set(f, { opacity: 0, y: 34, scale: 0.84, filter: 'blur(12px)' });
+  f.style.willChange = 'transform, opacity';
+  gsap.set(f, { opacity: 0, y: 38, scale: 0.80 });
   gsap.to(f, {
-    opacity: 1, y: 0, scale: 1, filter: 'blur(0px)',
+    opacity: 1, y: 0, scale: 1,
     duration: NAME_FLY_T, ease: 'power3.out',
     onComplete: () => {
-      gsap.set(f, { clearProps: 'filter' });
+      f.style.willChange = 'auto';      // 立即摘掉，别长期占合成层
       f.classList.add('is-float');      // 呼吸接手（动画本身有 1.9s delay，正好接住）
     },
   });
@@ -1298,17 +1317,26 @@ function showAiText(text) {
    * 不做逐段 stagger（那会变成挤牙膏），而是「整体」一次到位。
    *
    * 分两层动画：
-   *   ① 整体上浮 + 清模糊 + 淡入（浮出水面的主体动作）
+   *   ① 整体上浮 + 淡入（浮出水面的主体动作）
    *   ② 竖直方向的高频低幅振荡（幅度衰减到 0）= "水面抖动"，
    *      模拟破水瞬间那一下晃动。
-   * 抖动只动 .ai-text 的 transform，不碰内部文字排版，故不会触发重排。 */
-  gsap.set(el.aiText, { opacity: 0, y: 26, filter: 'blur(9px)' });
+   * 抖动只动 .ai-text 的 transform，不碰内部文字排版，故不会触发重排。
+   *
+   * 问题 2：这里原本还有 blur(9px)→blur(0)。blur 是整段文字的实时卷积，
+   * 与水面抖动叠加时会连续几十帧重算，是移动端最主要的掉帧源。
+   * 去掉模糊、把起始缩放交给分组层（见下方），视觉的"从水里出来"由
+   * 「上浮 + 抖动 + 分组淡入」共同承担，观感不变而开销回到纯合成属性。 */
+  gsap.set(el.aiText, { opacity: 0, y: 26 });
+  el.aiText.style.willChange = 'transform, opacity';
   el.aiText.classList.add('is-on');           // 打开滚动区显隐与定位（此时仍全透明）
 
   gsap.to(el.aiText, {
-    opacity: 1, y: 0, filter: 'blur(0px)',
+    opacity: 1, y: 0,
     duration: 1.25, ease: 'power3.out',
-    onComplete: () => { gsap.set(el.aiText, { clearProps: 'filter' }); },
+    onComplete: () => {
+      el.aiText.style.willChange = 'auto';
+      armSealFallback();        // 文字展示完成 → 1s 后（内容不可滚动时）浮出 Seal
+    },
   });
 
   /* 水面抖动：与上浮并行，0.09s 一跳、幅度 10→0 递减 */
@@ -1322,11 +1350,13 @@ function showAiText(text) {
     onComplete: () => { gsap.set(el.aiText, { clearProps: 'transform' }); },
   });
 
-  /* 英文组 / 中文组各自从模糊里成形（几乎同时，只留极小的先后） */
+  /* 英文组 / 中文组各自浮现成形（几乎同时，只留极小的先后）。
+   * 问题 2：原本是 blur(7px)→blur(0) 的逐组模糊，两层模糊叠加开销。
+   * 改为 scale 0.97→1 + 上浮，视觉上仍是"文字从纵深里成形"。 */
   Array.prototype.slice.call(el.aiText.children).forEach((g, i) => {
     gsap.fromTo(g,
-      { opacity: 0, filter: 'blur(7px)' },
-      { opacity: 1, filter: 'blur(0px)', duration: 1.05, delay: 0.1 + i * 0.08, ease: 'power2.out' });
+      { opacity: 0, y: 12, scale: 0.97, transformOrigin: '50% 100%' },
+      { opacity: 1, y: 0, scale: 1, duration: 1.05, delay: 0.1 + i * 0.08, ease: 'power2.out' });
   });
 
   playAiRipple();

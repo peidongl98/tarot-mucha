@@ -976,6 +976,10 @@ body.no-3d .card-hit img { visibility: visible; }
 
 .read-float.is-on { visibility: visible; }
 
+/* 问题 2：仅在放大态给浮层提合成层，动画结束后由 JS 摘除（见 app.js revealReadFloat）。
+ * 不在基础规则里挂 will-change —— 长期挂着会白占显存、拉高整页合成成本。 */
+.read-float.is-on { will-change: transform, opacity; }
+
 /* 牌名：花体 + 淡金 + 神性光晕（描边 + 双层 drop-shadow 模拟呼吸光） */
 .rf-name {
   margin: 0;
@@ -1026,7 +1030,9 @@ body.no-3d .card-hit img { visibility: visible; }
   }
 }
 
-/* 关键词：牌面下沿（牌底与牌义之间那条窄带），中英各一行、不滚动 */
+/* 关键词：牌面下沿（牌底与牌义之间那条窄带），中英各一行、不滚动
+ * 问题 2：淡入延迟调到 0.56s，与 3D 牌放大（0.9s）的减速段错开 ——
+ * 避免「牌放大 + 牌名浮出 + 关键词淡入」三段动画挤在同一帧里抢合成线程。 */
 .read-keys {
   position: fixed;
   left: 50%;
@@ -1041,7 +1047,8 @@ body.no-3d .card-hit img { visibility: visible; }
   color: var(--muted);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.6s ease 0.25s;
+  transition: opacity 0.6s ease 0.56s;   /* 0.25s → 0.56s：错开 3D 放大峰值 */
+  will-change: opacity;
 }
 
 .read-keys.is-on { opacity: 1; }
@@ -1189,6 +1196,11 @@ body.no-3d .card-hit img { visibility: visible; }
   width: 100%;
   height: 100%;
   overflow: visible;
+  /* 问题 2：常驻的 drop-shadow 呼吸改为 opacity 呼吸。
+   * drop-shadow 每帧都要重新做一次模糊卷积，而这两个箭头在滚筒态常驻、
+   * 与「点牌放大」同屏，是合成线程上的稳定负担。改用 opacity 后完全走合成器，
+   * 视觉上「呼吸明灭」的观感一致（发光由静态 filter 提供，不再逐帧变）。 */
+  filter: drop-shadow(0 0 6px rgba(201, 169, 97, 0.55));
   animation: navPulse 2.8s ease-in-out infinite;
 }
 
@@ -1200,8 +1212,8 @@ body.no-3d .card-hit img { visibility: visible; }
 }
 
 @keyframes navPulse {
-  0%, 100% { filter: drop-shadow(0 0 4px rgba(201, 169, 97, 0.4)); }
-  50%      { filter: drop-shadow(0 0 10px rgba(201, 169, 97, 0.8)); }
+  0%, 100% { opacity: 0.62; }
+  50%      { opacity: 1; }
 }
 
 /* ---------- 滚筒居中标签：居中牌的身份（过去 / 现在 / 未来） ---------- */
